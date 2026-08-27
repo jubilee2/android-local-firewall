@@ -17,10 +17,13 @@ jobs:
   build:
     name: Test, lint, and build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Validate Gradle wrapper
         uses: gradle/actions/wrapper-validation@v4
@@ -35,13 +38,13 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Run unit tests
-        run: ./gradlew test
+        run: ./gradlew --no-daemon --stacktrace test
 
       - name: Run Android lint
-        run: ./gradlew lint
+        run: ./gradlew --no-daemon --stacktrace lint
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug
+        run: ./gradlew --no-daemon --stacktrace assembleDebug
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
