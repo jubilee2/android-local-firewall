@@ -37,6 +37,9 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Verify AGP built-in Kotlin configuration
+        run: ./scripts/check-agp-built-in-kotlin.sh
+
       - name: Run unit tests
         run: ./gradlew --no-daemon --stacktrace test
 
