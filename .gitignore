@@ -14,10 +14,6 @@ captures/
 .cxx/
 *.aab
 *.apk
-*.aar
-*.jpeg
-*.jpg
-*.png
 output-metadata.json
 
 # IntelliJ
