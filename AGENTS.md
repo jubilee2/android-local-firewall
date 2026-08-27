@@ -67,6 +67,12 @@ VpnService must be used.
 
 Allowed connections must not accidentally bypass firewall policy.
 
+Never use `VpnService.Builder.addDisallowedApplication()` as a firewall
+BLOCK rule. Disallowed applications bypass the VPN and use the underlying
+system network.
+
+Do not call `VpnService.Builder.allowBypass()`.
+
 Sockets created by the VPN implementation that connect to the Internet
 must use VpnService.protect() when appropriate to prevent routing loops.
 
