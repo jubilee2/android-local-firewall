@@ -49,7 +49,7 @@ Initial implementation may use a single Android app module.
 
 Package structure:
 
-com.example.localfirewall
+com.localfirewall
 
 ui/
 vpn/
