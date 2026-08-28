@@ -10,11 +10,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 
 /** A bounded packet source, separated from Android's TUN descriptor for unit testing. */
 internal fun interface PacketSource : Closeable {
@@ -70,18 +68,17 @@ internal class PacketProcessor(
             // Cancellation is an expected shutdown signal.
         } catch (_: Exception) {
             // An unexpected parser or source failure ends this worker without crashing the service.
+        } finally {
+            runCatching { source.close() }
         }
     }
 
+    /** Signals cancellation without waiting for a potentially blocked descriptor read. */
     override fun close() {
-        val job = synchronized(this) {
+        synchronized(this) {
             if (stopped) return
             stopped = true
-            runCatching { source.close() }
-            worker.also { worker = null }
-        }
-        runBlocking {
-            job?.cancelAndJoin()
+            worker?.cancel()
         }
     }
 

@@ -53,6 +53,7 @@ class FirewallVpnService : VpnService() {
 
     private fun stopService() {
         stopPacketProcessor()
+        // ParcelFileDescriptor owns the TUN descriptor; closing it unblocks a blocking read.
         vpnInterface.close()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
@@ -62,6 +63,7 @@ class FirewallVpnService : VpnService() {
 
     override fun onDestroy() {
         stopPacketProcessor()
+        // This is idempotent and also releases a read still blocked in PacketProcessor.
         vpnInterface.close()
         FirewallServiceState.setStarted(false)
         super.onDestroy()
@@ -73,6 +75,7 @@ class FirewallVpnService : VpnService() {
                 .setSession(getString(R.string.vpn_session_name))
                 .addAddress(VPN_ADDRESS, VPN_PREFIX_LENGTH)
                 .allowFamily(OsConstants.AF_INET6)
+                .setBlocking(true)
                 .establish()
         }
     } catch (_: IllegalStateException) {

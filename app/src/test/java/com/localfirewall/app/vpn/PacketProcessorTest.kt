@@ -66,6 +66,11 @@ class PacketProcessorTest {
         assertTrue(source.readStarted.await(1, TimeUnit.SECONDS))
 
         processor.close()
+        assertFalse(processor.isRunning())
+
+        // Cancellation is deliberately non-blocking; the owning TUN resource must be closed too.
+        source.close()
+        assertTrue(source.readExited.await(1, TimeUnit.SECONDS))
         processor.close()
 
         assertFalse(processor.isRunning())
@@ -107,18 +112,22 @@ class PacketProcessorTest {
 
     private class BlockingSource : PacketSource {
         val readStarted = CountDownLatch(1)
+        val readExited = CountDownLatch(1)
         val closeCount = AtomicInteger()
         private val closed = CountDownLatch(1)
 
         override fun read(buffer: ByteArray): Int {
             readStarted.countDown()
             closed.await()
+            readExited.countDown()
             throw IOException("closed")
         }
 
         override fun close() {
-            closeCount.incrementAndGet()
-            closed.countDown()
+            if (closed.count == 1L) {
+                closeCount.incrementAndGet()
+                closed.countDown()
+            }
         }
     }
 
