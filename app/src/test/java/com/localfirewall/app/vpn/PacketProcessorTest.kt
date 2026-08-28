@@ -44,12 +44,13 @@ class PacketProcessorTest {
     fun `malformed packets do not prevent later packets from being read`() {
         val reads = AtomicInteger()
         val processor = processor(
-            SequenceSource(listOf(byteArrayOf(0), validIpv4Packet())),
-        ) { packet ->
-            reads.incrementAndGet()
-            // Exercise the production parser path without assuming every packet is valid.
-            com.localfirewall.app.network.IPv4PacketParser.parse(packet)
-        }
+            source = SequenceSource(listOf(byteArrayOf(0), validIpv4Packet())),
+            handler = { packet ->
+                reads.incrementAndGet()
+                // Exercise the production parser path without assuming every packet is valid.
+                com.localfirewall.app.network.IPv4PacketParser.parse(packet)
+            },
+        )
 
         processor.start()
         awaitStopped(processor)
@@ -61,7 +62,10 @@ class PacketProcessorTest {
     fun `stop cancels blocked reading and is safe when repeated`() {
         val source = BlockingSource()
         val handled = AtomicInteger()
-        val processor = processor(source) { handled.incrementAndGet() }
+        val processor = processor(
+            source = source,
+            handler = { handled.incrementAndGet() },
+        )
         processor.start()
         assertTrue(source.readStarted.await(1, TimeUnit.SECONDS))
 
@@ -83,8 +87,9 @@ class PacketProcessorTest {
         val terminations = AtomicInteger()
         val processor = processor(
             source = SequenceSource(emptyList()),
+            handler = {},
             onUnexpectedTermination = { terminations.incrementAndGet() },
-        ) {}
+        )
 
         processor.start()
         awaitStopped(processor)
@@ -98,8 +103,9 @@ class PacketProcessorTest {
         val terminations = AtomicInteger()
         val processor = processor(
             source = PacketSource { throw IOException("read failed") },
+            handler = {},
             onUnexpectedTermination = { terminations.incrementAndGet() },
-        ) {}
+        )
 
         processor.start()
         awaitStopped(processor)
@@ -113,8 +119,9 @@ class PacketProcessorTest {
         val terminations = AtomicInteger()
         val processor = processor(
             source = source,
+            handler = {},
             onUnexpectedTermination = { terminations.incrementAndGet() },
-        ) {}
+        )
         processor.start()
         assertTrue(source.readStarted.await(1, TimeUnit.SECONDS))
 
@@ -127,8 +134,8 @@ class PacketProcessorTest {
 
     private fun processor(
         source: PacketSource,
-        onUnexpectedTermination: (PacketProcessor) -> Unit = {},
         handler: (ByteArray) -> Unit,
+        onUnexpectedTermination: (PacketProcessor) -> Unit = {},
     ): PacketProcessor = PacketProcessor(
         source = source,
         packetHandler = handler,
