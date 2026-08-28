@@ -20,7 +20,10 @@ class FirewallServiceCommandHandlerTest {
         var started = false
         var stopped = false
         val result = FirewallServiceCommandHandler(
-            start = { started = true },
+            start = {
+                started = true
+                true
+            },
             stop = { stopped = true },
         ).handle(FirewallVpnService.ACTION_START)
 
@@ -32,7 +35,7 @@ class FirewallServiceCommandHandlerTest {
     @Test
     fun `start command requests intent redelivery after service restart`() {
         val result = FirewallServiceCommandHandler(
-            start = {},
+            start = { true },
             stop = {},
         ).handle(FirewallVpnService.ACTION_START)
 
@@ -44,12 +47,25 @@ class FirewallServiceCommandHandlerTest {
         var started = false
         var stopped = false
         val result = FirewallServiceCommandHandler(
-            start = { started = true },
+            start = {
+                started = true
+                true
+            },
             stop = { stopped = true },
         ).handle(FirewallVpnService.ACTION_STOP)
 
         assertFalse(started)
         assertTrue(stopped)
+        assertEquals(Service.START_NOT_STICKY, result)
+    }
+
+    @Test
+    fun `failed start is not redelivered`() {
+        val result = FirewallServiceCommandHandler(
+            start = { false },
+            stop = {},
+        ).handle(FirewallVpnService.ACTION_START)
+
         assertEquals(Service.START_NOT_STICKY, result)
     }
 }
