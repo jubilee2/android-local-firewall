@@ -55,7 +55,7 @@ class FirewallVpnService : VpnService() {
 
     private fun stopService() {
         stopPacketProcessor()
-        // ParcelFileDescriptor owns the TUN descriptor; closing it unblocks a blocking read.
+        // ParcelFileDescriptor owns the TUN descriptor and is released after polling is canceled.
         vpnInterface.close()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
@@ -65,7 +65,7 @@ class FirewallVpnService : VpnService() {
 
     override fun onDestroy() {
         stopPacketProcessor()
-        // This is idempotent and also releases a read still blocked in PacketProcessor.
+        // This is idempotent and releases the descriptor after packet polling is canceled.
         vpnInterface.close()
         FirewallServiceState.setStarted(false)
         super.onDestroy()

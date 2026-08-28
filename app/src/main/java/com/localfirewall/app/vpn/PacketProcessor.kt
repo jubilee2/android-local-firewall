@@ -47,7 +47,7 @@ internal class PollingTunPacketSource(
                 if (length == 0) END_OF_STREAM else length
             }
         } catch (error: ErrnoException) {
-            if (error.errno == OsConstants.EAGAIN || error.errno == OsConstants.EWOULDBLOCK) {
+            if (error.errno == OsConstants.EAGAIN) {
                 NO_PACKET
             } else {
                 throw IOException("TUN polling or read failed", error)
