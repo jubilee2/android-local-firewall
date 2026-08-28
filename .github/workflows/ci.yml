@@ -46,9 +46,23 @@ jobs:
       - name: Build debug APK
         run: ./gradlew --no-daemon --stacktrace assembleDebug
 
+      - name: Verify native probe packaging and record size
+        run: |
+          unzip -l app/build/outputs/apk/debug/app-debug.apk 'lib/*/liboutline_forwarder_probe.so' | tee native-size-report.txt
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'lib/arm64-v8a/liboutline_forwarder_probe.so'
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'lib/x86_64/liboutline_forwarder_probe.so'
+          stat --printf='debug APK: %s bytes\n' app/build/outputs/apk/debug/app-debug.apk | tee -a native-size-report.txt
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v7
         with:
           name: debug-apk
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload native size report
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-size-report
+          path: native-size-report.txt
           if-no-files-found: error
