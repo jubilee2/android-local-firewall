@@ -15,7 +15,6 @@ import android.system.OsConstants
 import androidx.core.app.ServiceCompat
 import com.localfirewall.app.R
 import java.io.Closeable
-import java.io.FileInputStream
 
 class FirewallVpnService : VpnService() {
     private val vpnInterface = VpnInterfaceLifecycle<ParcelFileDescriptor>()
@@ -78,7 +77,6 @@ class FirewallVpnService : VpnService() {
                 .setSession(getString(R.string.vpn_session_name))
                 .addAddress(VPN_ADDRESS, VPN_PREFIX_LENGTH)
                 .allowFamily(OsConstants.AF_INET6)
-                .setBlocking(true)
                 .establish()
         }
     } catch (_: IllegalStateException) {
@@ -92,7 +90,7 @@ class FirewallVpnService : VpnService() {
     private fun startPacketProcessor(tunInterface: ParcelFileDescriptor) {
         if (packetProcessor != null) return
         packetProcessor = PacketProcessor(
-            InputStreamPacketSource(FileInputStream(tunInterface.fileDescriptor)),
+            PollingTunPacketSource(tunInterface.fileDescriptor),
             onUnexpectedTermination = { terminatedProcessor ->
                 mainHandler.post {
                     if (packetProcessor === terminatedProcessor) stopService()

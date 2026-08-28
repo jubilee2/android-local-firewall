@@ -132,6 +132,43 @@ class PacketProcessorTest {
         assertEquals(0, terminations.get())
     }
 
+    @Test
+    fun `idle poll timeouts do not terminate worker and cancellation exits promptly`() {
+        val source = PollTimeoutSource()
+        val terminations = AtomicInteger()
+        val processor = processor(
+            source = source,
+            handler = {},
+            onUnexpectedTermination = { terminations.incrementAndGet() },
+        )
+        processor.start()
+        assertTrue(source.firstTimeout.await(1, TimeUnit.SECONDS))
+
+        processor.close()
+
+        assertTrue(source.workerExited.await(500, TimeUnit.MILLISECONDS))
+        assertEquals(0, terminations.get())
+    }
+
+    @Test
+    fun `no-data result does not report unexpected termination`() {
+        val source = NoDataThenBlockingSource()
+        val terminations = AtomicInteger()
+        val processor = processor(
+            source = source,
+            handler = {},
+            onUnexpectedTermination = { terminations.incrementAndGet() },
+        )
+        processor.start()
+        assertTrue(source.noDataReturned.await(1, TimeUnit.SECONDS))
+
+        processor.close()
+        source.close()
+        assertTrue(source.readExited.await(1, TimeUnit.SECONDS))
+
+        assertEquals(0, terminations.get())
+    }
+
     private fun processor(
         source: PacketSource,
         handler: (ByteArray) -> Unit,
@@ -181,6 +218,43 @@ class PacketProcessorTest {
                 closeCount.incrementAndGet()
                 closed.countDown()
             }
+        }
+    }
+
+    private class PollTimeoutSource : PacketSource {
+        val firstTimeout = CountDownLatch(1)
+        val workerExited = CountDownLatch(1)
+
+        override fun read(buffer: ByteArray): Int {
+            Thread.sleep(50)
+            firstTimeout.countDown()
+            return 0
+        }
+
+        override fun close() {
+            workerExited.countDown()
+        }
+    }
+
+    private class NoDataThenBlockingSource : PacketSource {
+        val noDataReturned = CountDownLatch(1)
+        val readExited = CountDownLatch(1)
+        private val closed = CountDownLatch(1)
+        private var firstRead = true
+
+        override fun read(buffer: ByteArray): Int {
+            if (firstRead) {
+                firstRead = false
+                noDataReturned.countDown()
+                return 0
+            }
+            closed.await()
+            readExited.countDown()
+            throw IOException("closed")
+        }
+
+        override fun close() {
+            closed.countDown()
         }
     }
 

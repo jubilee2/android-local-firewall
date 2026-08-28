@@ -1,11 +1,15 @@
 package com.localfirewall.app.vpn
 
+import android.system.ErrnoException
+import android.system.Os
+import android.system.OsConstants
+import android.system.StructPollfd
 import com.localfirewall.app.network.IPv4PacketParser
 import com.localfirewall.app.network.TcpPacketParser
 import com.localfirewall.app.network.UdpPacketParser
 import java.io.Closeable
+import java.io.FileDescriptor
 import java.io.IOException
-import java.io.InputStream
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -21,12 +25,41 @@ internal fun interface PacketSource : Closeable {
     override fun close() = Unit
 }
 
-internal class InputStreamPacketSource(
-    private val input: InputStream,
+/** Polls the non-blocking TUN descriptor so cancellation is observed within [pollTimeoutMillis]. */
+internal class PollingTunPacketSource(
+    private val descriptor: FileDescriptor,
+    private val pollTimeoutMillis: Int = DEFAULT_POLL_TIMEOUT_MILLIS,
 ) : PacketSource {
-    override fun read(buffer: ByteArray): Int = input.read(buffer)
+    init {
+        require(pollTimeoutMillis > 0) { "pollTimeoutMillis must be positive" }
+    }
 
-    override fun close() = input.close()
+    override fun read(buffer: ByteArray): Int {
+        val pollDescriptor = StructPollfd().apply {
+            fd = descriptor
+            events = OsConstants.POLLIN.toShort()
+        }
+        return try {
+            if (Os.poll(arrayOf(pollDescriptor), pollTimeoutMillis) == 0) {
+                NO_PACKET
+            } else {
+                val length = Os.read(descriptor, buffer, 0, buffer.size)
+                if (length == 0) END_OF_STREAM else length
+            }
+        } catch (error: ErrnoException) {
+            if (error.errno == OsConstants.EAGAIN || error.errno == OsConstants.EWOULDBLOCK) {
+                NO_PACKET
+            } else {
+                throw IOException("TUN polling or read failed", error)
+            }
+        }
+    }
+
+    private companion object {
+        const val DEFAULT_POLL_TIMEOUT_MILLIS = 200
+        const val NO_PACKET = 0
+        const val END_OF_STREAM = -1
+    }
 }
 
 /** Consumes packets from a TUN source on a dedicated background coroutine. */
