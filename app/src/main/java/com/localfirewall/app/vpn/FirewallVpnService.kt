@@ -13,9 +13,11 @@ import android.system.OsConstants
 import androidx.core.app.ServiceCompat
 import com.localfirewall.app.R
 import java.io.Closeable
+import java.io.FileInputStream
 
 class FirewallVpnService : VpnService() {
     private val vpnInterface = VpnInterfaceLifecycle<ParcelFileDescriptor>()
+    private var packetProcessor: PacketProcessor? = null
 
     companion object {
         const val ACTION_START = "com.localfirewall.app.vpn.action.START"
@@ -35,7 +37,9 @@ class FirewallVpnService : VpnService() {
         return FirewallServiceCommandHandler(
             start = {
                 startForeground(NOTIFICATION_ID, createNotification())
-                if (establishVpnInterface() != null) {
+                val tunInterface = establishVpnInterface()
+                if (tunInterface != null) {
+                    startPacketProcessor(tunInterface)
                     FirewallServiceState.setStarted(true)
                     true
                 } else {
@@ -48,6 +52,7 @@ class FirewallVpnService : VpnService() {
     }
 
     private fun stopService() {
+        stopPacketProcessor()
         vpnInterface.close()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
@@ -56,6 +61,7 @@ class FirewallVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        stopPacketProcessor()
         vpnInterface.close()
         FirewallServiceState.setStarted(false)
         super.onDestroy()
@@ -75,6 +81,18 @@ class FirewallVpnService : VpnService() {
     } catch (_: SecurityException) {
         vpnInterface.close()
         null
+    }
+
+    private fun startPacketProcessor(tunInterface: ParcelFileDescriptor) {
+        if (packetProcessor != null) return
+        packetProcessor = PacketProcessor(
+            InputStreamPacketSource(FileInputStream(tunInterface.fileDescriptor)),
+        ).also(PacketProcessor::start)
+    }
+
+    private fun stopPacketProcessor() {
+        packetProcessor?.close()
+        packetProcessor = null
     }
 
     private fun createNotification(): Notification =
