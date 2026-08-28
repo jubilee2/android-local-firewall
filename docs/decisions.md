@@ -89,7 +89,7 @@ The forwarder fails closed:
 
 ### Shutdown behavior
 
-`stop()` is idempotent and bounded. It refuses new flows, cancels and joins workers, closes host sockets and stack endpoints, clears flow decisions and UID/fragment caches, releases native TUN duplicates and JNI references, and returns. Forced native close must unblock reads. The service closes its `ParcelFileDescriptor` only after the forwarder stops. Failed-start cleanup and Android service destruction use the same path; a cleanup error must not prevent a fresh later instance.
+`stop()` is idempotent and bounded. It refuses new flows, cancels and joins workers, closes host sockets and stack endpoints, clears flow decisions and UID/fragment caches, releases native TUN duplicates and JNI references, and returns. Forced native close must unblock reads. The service closes its `ParcelFileDescriptor` only after the forwarder stops. Failed-start cleanup and Android service destruction use the same path. If stop fails, lifecycle ownership is retained and another forwarder cannot start; cleanup may be retried, and a fresh instance is permitted only after the previous forwarder is known to be quiescent.
 
 ### Spike and acceptance gates before adding a default route
 

@@ -36,7 +36,7 @@ internal class PacketForwarderLifecycle(
     @Synchronized
     fun stop() {
         val active = forwarder ?: return
+        active.stop()
         forwarder = null
-        runCatching { active.stop() }
     }
 }

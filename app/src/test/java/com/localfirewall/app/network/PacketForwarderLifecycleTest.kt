@@ -83,23 +83,31 @@ class PacketForwarderLifecycleTest {
     }
 
     @Test
-    fun `stop failure still permits a new forwarder`() {
-        val failed = RecordingForwarder(stopFailure = IllegalStateException("stop failed"))
+    fun `stop failure retains forwarder until cleanup retry succeeds`() {
+        val failed = RecordingForwarder(
+            stopFailures = ArrayDeque(listOf(IllegalStateException("stop failed"))),
+        )
         val replacement = RecordingForwarder()
         val candidates = ArrayDeque(listOf(failed, replacement))
         val lifecycle = PacketForwarderLifecycle { candidates.removeFirst() }
         lifecycle.start()
 
+        assertThrows(IllegalStateException::class.java) { lifecycle.stop() }
+        lifecycle.start()
+
+        assertEquals(1, failed.startCount)
+        assertEquals(0, replacement.startCount)
+
         lifecycle.stop()
         lifecycle.start()
 
-        assertEquals(1, failed.stopCount)
+        assertEquals(2, failed.stopCount)
         assertEquals(1, replacement.startCount)
     }
 
     private class RecordingForwarder(
         private val startFailure: Throwable? = null,
-        private val stopFailure: Throwable? = null,
+        private val stopFailures: ArrayDeque<Throwable> = ArrayDeque(),
     ) : PacketForwarder {
         var startCount = 0
         var stopCount = 0
@@ -111,7 +119,7 @@ class PacketForwarderLifecycleTest {
 
         override fun stop() {
             stopCount += 1
-            stopFailure?.let { throw it }
+            if (stopFailures.isNotEmpty()) throw stopFailures.removeFirst()
         }
     }
 }
