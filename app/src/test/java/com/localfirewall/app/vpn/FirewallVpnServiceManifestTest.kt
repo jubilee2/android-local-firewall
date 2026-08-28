@@ -17,6 +17,7 @@ class FirewallVpnServiceManifestTest {
             isNamespaceAware = true
         }.newDocumentBuilder().parse(manifest)
         val androidNamespace = "http://schemas.android.com/apk/res/android"
+        val toolsNamespace = "http://schemas.android.com/tools"
 
         val permissions = document.getElementsByTagName("uses-permission")
             .let { nodes ->
@@ -36,6 +37,10 @@ class FirewallVpnServiceManifestTest {
         assertEquals(
             "systemExempted",
             service.attributes.getNamedItemNS(androidNamespace, "foregroundServiceType").nodeValue,
+        )
+        assertEquals(
+            "ForegroundServicePermission",
+            service.attributes.getNamedItemNS(toolsNamespace, "ignore").nodeValue,
         )
     }
 }
