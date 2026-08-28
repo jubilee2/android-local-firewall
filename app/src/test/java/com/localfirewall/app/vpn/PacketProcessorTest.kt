@@ -79,17 +79,63 @@ class PacketProcessorTest {
     }
 
     @Test
-    fun `EOF exits without continuing the worker`() {
-        val processor = processor(SequenceSource(emptyList())) {}
+    fun `unexpected EOF reports termination`() {
+        val terminations = AtomicInteger()
+        val processor = processor(
+            source = SequenceSource(emptyList()),
+            onUnexpectedTermination = { terminations.incrementAndGet() },
+        ) {}
 
         processor.start()
         awaitStopped(processor)
 
         assertFalse(processor.isRunning())
+        assertEquals(1, terminations.get())
     }
 
-    private fun processor(source: PacketSource, handler: (ByteArray) -> Unit): PacketProcessor =
-        PacketProcessor(source, handler, Dispatchers.IO, bufferSize = 64)
+    @Test
+    fun `unexpected IOException reports termination`() {
+        val terminations = AtomicInteger()
+        val processor = processor(
+            source = PacketSource { throw IOException("read failed") },
+            onUnexpectedTermination = { terminations.incrementAndGet() },
+        ) {}
+
+        processor.start()
+        awaitStopped(processor)
+
+        assertEquals(1, terminations.get())
+    }
+
+    @Test
+    fun `intentional cancellation and source closure do not report termination`() {
+        val source = BlockingSource()
+        val terminations = AtomicInteger()
+        val processor = processor(
+            source = source,
+            onUnexpectedTermination = { terminations.incrementAndGet() },
+        ) {}
+        processor.start()
+        assertTrue(source.readStarted.await(1, TimeUnit.SECONDS))
+
+        processor.close()
+        source.close()
+        assertTrue(source.readExited.await(1, TimeUnit.SECONDS))
+
+        assertEquals(0, terminations.get())
+    }
+
+    private fun processor(
+        source: PacketSource,
+        onUnexpectedTermination: (PacketProcessor) -> Unit = {},
+        handler: (ByteArray) -> Unit,
+    ): PacketProcessor = PacketProcessor(
+        source = source,
+        packetHandler = handler,
+        onUnexpectedTermination = onUnexpectedTermination,
+        dispatcher = Dispatchers.IO,
+        bufferSize = 64,
+    )
 
     private fun awaitStopped(processor: PacketProcessor) {
         repeat(100) {

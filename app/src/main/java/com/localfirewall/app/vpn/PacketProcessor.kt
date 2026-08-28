@@ -33,10 +33,12 @@ internal class InputStreamPacketSource(
 internal class PacketProcessor(
     private val source: PacketSource,
     private val packetHandler: (ByteArray) -> Unit = ::parsePacketMetadata,
+    private val onUnexpectedTermination: (PacketProcessor) -> Unit = {},
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val bufferSize: Int = DEFAULT_BUFFER_SIZE,
 ) : Closeable {
     private var worker: Job? = null
+    @Volatile
     private var stopped = false
 
     init {
@@ -55,21 +57,30 @@ internal class PacketProcessor(
 
     private suspend fun readPackets() {
         val buffer = ByteArray(bufferSize)
+        var terminatedUnexpectedly = false
         try {
             while (currentCoroutineContext().isActive) {
                 val length = source.read(buffer)
-                if (length < 0) break
+                if (length < 0) {
+                    terminatedUnexpectedly = !stopped
+                    break
+                }
                 if (length == 0) continue
                 packetHandler(buffer.copyOf(length))
             }
         } catch (_: IOException) {
-            // Closing the packet source is the normal way to unblock a TUN read during shutdown.
+            // Descriptor closure is expected during shutdown; other I/O failures stop the VPN.
+            terminatedUnexpectedly = !stopped
         } catch (_: CancellationException) {
             // Cancellation is an expected shutdown signal.
         } catch (_: Exception) {
             // An unexpected parser or source failure ends this worker without crashing the service.
+            terminatedUnexpectedly = !stopped
         } finally {
             runCatching { source.close() }
+            if (terminatedUnexpectedly && !stopped) {
+                runCatching { onUnexpectedTermination(this) }
+            }
         }
     }
 

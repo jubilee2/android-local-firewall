@@ -8,6 +8,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.system.OsConstants
 import androidx.core.app.ServiceCompat
@@ -17,6 +19,7 @@ import java.io.FileInputStream
 
 class FirewallVpnService : VpnService() {
     private val vpnInterface = VpnInterfaceLifecycle<ParcelFileDescriptor>()
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var packetProcessor: PacketProcessor? = null
 
     companion object {
@@ -90,6 +93,11 @@ class FirewallVpnService : VpnService() {
         if (packetProcessor != null) return
         packetProcessor = PacketProcessor(
             InputStreamPacketSource(FileInputStream(tunInterface.fileDescriptor)),
+            onUnexpectedTermination = { terminatedProcessor ->
+                mainHandler.post {
+                    if (packetProcessor === terminatedProcessor) stopService()
+                }
+            },
         ).also(PacketProcessor::start)
     }
 
