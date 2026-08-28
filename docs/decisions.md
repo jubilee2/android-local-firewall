@@ -1,8 +1,8 @@
 # Forwarding architecture decisions
 
-## ADR-001: Prototype an existing userspace network stack
+## ADR-001: Use Outline SDK’s lwIP transport bridge
 
-**Status:** provisional; native-stack selection requires an Android spike
+**Status:** accepted for prototyping; dependency adoption still requires an Android integration spike
 **Research reviewed:** 2026-08-28
 
 ### Context and constraints
@@ -11,29 +11,19 @@ A TUN file descriptor supplies IP packets, not socket byte streams. In particula
 
 No default IPv4 or IPv6 route is added by this decision. Capturing all traffic is deferred until a working ALLOW path is protected against VPN recursion and tested end-to-end.
 
-### Provisional decision
+### Decision
 
-Use a mature, maintained userspace stack behind the Kotlin `PacketForwarder` boundary. Select the exact stack only after an Android spike compares the following distinct options and proves all acceptance gates below:
+Use the maintained [Outline SDK](https://github.com/OutlineFoundation/outline-sdk) `network/lwip2transport` bridge, which embeds the mature lwIP userspace TCP/IP stack, behind the Kotlin `PacketForwarder` boundary. Write a small project-owned Go/JNI adapter that supplies direct (not SOCKS) TCP and UDP transports to the packets’ original destinations. The adapter must expose synchronous flow-admission and socket-protection callbacks before any outbound connection or datagram.
 
-#### Option A: direct gVisor netstack integration
+This selection is architectural, not approval to add an unverified binary. Before importing the dependency or adding a default route, a focused Android spike must prove the acceptance gates below against a pinned revision. If the current API cannot provide direct original-destination TCP **and** UDP forwarding or cannot guarantee pre-I/O socket protection, this ADR must be superseded rather than weakened with a remote/local proxy or an unprotected path.
 
-Build a thin, pinned Go/JNI adapter directly against [gVisor `pkg/tcpip`](https://github.com/google/gvisor/tree/master/pkg/tcpip). The adapter would feed TUN packets to gVisor netstack, admit TCP and UDP flows, and relay allowed flows through protected OS sockets connected directly to their original destinations. This option uses gVisor's TCP/IP implementation; it does **not** use or claim to package an Outline TUN integration.
-
-[Outline SDK](https://github.com/OutlineFoundation/outline-sdk) may inform lifecycle, relay, and mobile API design, but is an architectural reference only for Option A. It is not evidence that gVisor integrates with current Outline SDK.
-
-#### Option B: current Outline SDK lwIP integration
-
-Spike the current `OutlineFoundation/outline-sdk` [`network/lwip2transport`](https://github.com/OutlineFoundation/outline-sdk/tree/main/network/lwip2transport) and PacketRelay design. Current module paths are [`golang.getoutline.org/sdk`](https://pkg.go.dev/golang.getoutline.org/sdk) and [`golang.getoutline.org/sdk/x`](https://pkg.go.dev/golang.getoutline.org/sdk/x); the former Jigsaw module paths are deprecated. This integration uses **lwIP**, and its current [`go.mod`](https://github.com/OutlineFoundation/outline-sdk/blob/main/go.mod) depends on `github.com/eycorsican/go-tun2socks`. It is not gVisor-based, and no nonexistent `x/tun2socks` package is assumed.
-
-The spike must determine whether PacketRelay/lwIP can expose a direct original-destination TCP and UDP transport with a synchronous pre-connect/pre-send Android socket-protection hook. A design that requires a SOCKS server, remote proxy, or backend does not qualify.
-
-Neither option is selected yet. No native dependency or binary is added by this ADR. The eventual implementation will own the TUN duplicate/JNI handle, native stack, flow table, protected outbound sockets, and workers. `PacketForwarderLifecycle` only establishes lifecycle and cleanup semantics; it is intentionally not connected to `FirewallVpnService` yet.
+The eventual implementation will own the TUN duplicate/JNI handle, lwIP instance, flow table, protected outbound sockets, and workers. `PacketForwarderLifecycle` establishes lifecycle and cleanup semantics only; it is intentionally not connected to `FirewallVpnService` yet. No native dependency, binary, capture route, backend, remote VPN, or SOCKS server is added by this decision.
 
 ### Required forwarding path
 
 ```text
 TUN packet
-  -> selected existing userspace IP/TCP/UDP stack
+  -> Outline SDK lwIP userspace IP/TCP/UDP bridge
   -> new-flow metadata + Android UID resolution
   -> RuleEngine decision
        BLOCK -> reject/drop; create no Internet socket
@@ -49,11 +39,11 @@ This placement prevents a blocked flow from opening a real connection. A decisio
 
 #### TCP strategy
 
-The selected existing stack terminates the app-side TCP connection and handles sequence numbers, ACKs, retransmission, congestion, windows, and teardown. After an ALLOW decision, the adapter creates a host TCP socket for the original destination, protects it, connects it, and performs bounded, back-pressured bidirectional relay. A blocked TCP flow creates no outbound socket.
+lwIP terminates the app-side TCP connection and handles sequence numbers, ACKs, retransmission, congestion, windows, and teardown. After an ALLOW decision, the adapter creates a host TCP socket for the original destination, protects it, connects it, and performs bounded, back-pressured bidirectional relay. A blocked TCP flow creates no outbound socket.
 
 #### UDP strategy
 
-The selected existing stack supplies UDP endpoints and IP handling. Allowed datagrams use protected host UDP sockets keyed by flow, bounded queues, and idle expiry; responses return only to the matching stack endpoint. Blocked datagrams are discarded without creating a host socket. Flow-count, queue, and datagram-size limits are mandatory. DNS receives no remote or special bypass path.
+lwIP supplies UDP endpoints and IP handling. Allowed datagrams use protected host UDP sockets keyed by flow, bounded queues, and idle expiry; responses return only to the matching stack endpoint. Blocked datagrams are discarded without creating a host socket. Flow-count, queue, and datagram-size limits are mandatory. DNS receives no remote or special bypass path.
 
 #### Loop prevention
 
@@ -65,8 +55,8 @@ Protection prevents routing loops; it is not policy bypass. Only an ALLOW decisi
 
 | Approach | Android, protocols, and IP | Maintenance, licensing, and integration | Size, battery, performance, and security | Status |
 |---|---|---|---|---|
-| **A: direct gVisor `pkg/tcpip`** | Go/JNI packaging; mature TCP/UDP and IPv4/IPv6 upstream. A custom thin adapter must provide direct dialing, UID admission, and the protection callback. | [gVisor](https://github.com/google/gvisor) is actively maintained and Apache-2.0. Pin the exact revision and notices. No Outline implementation is packaged by assumption. | Go runtime/netstack may produce a larger ABI payload than C; measure it. Event-driven relay should avoid per-packet JNI. Track [gVisor advisories](https://github.com/google/gvisor/security/advisories); embedding netstack does not supply the full gVisor sandbox. | Provisional candidate. |
-| **B: Outline `network/lwip2transport` / PacketRelay** | Current Outline TUN integration uses lwIP and `go-tun2socks`; it targets TCP/UDP transport, but Android API 29+, direct original-destination behavior, IPv4/IPv6, protection hooks, and ABI packaging require proof. | Current [Outline SDK](https://github.com/OutlineFoundation/outline-sdk) is actively maintained. Its license plus transitive lwIP/go-tun2socks licenses and notices must be verified and pinned; C/Go/JNI/native artifacts are expected. | lwIP is compact and established, while the wrapper/runtime and ABI delta must be measured. Native C adds memory-safety and patch-monitoring obligations. Relay copies, wakeups, throughput, and idle cost require device benchmarks. | Provisional candidate, distinct from gVisor. |
+| **Direct gVisor `pkg/tcpip`** | Mature TCP/UDP and IPv4/IPv6, but requires a larger project-owned Go adapter for TUN endpoints, flow admission, direct dialing, UID hooks, and protection. | Actively maintained and Apache-2.0; Go/JNI packaging is required. | Memory-safe Go reduces C memory hazards, but the runtime/netstack can increase per-ABI size. Android packaging and mobile API stability require proof. Embedding netstack does not provide the full gVisor sandbox. | Not selected: more integration surface than the purpose-built Outline bridge. Retain as fallback if the spike invalidates the selection. |
+| **Outline `network/lwip2transport` / PacketRelay** | Purpose-built TUN-to-transport bridge using lwIP, with TCP/UDP support and an IPv4/IPv6-capable underlying stack. Android API 29+, direct original-destination behavior, IPv6 integration, protection hooks, and ABI packaging still require proof. | Actively maintained. Go/JNI plus native lwIP artifacts are expected; pin and audit the complete license/NOTICE graph. | lwIP is compact and established. Native C adds memory-safety and patch-monitoring obligations; relay copies, wakeups, throughput, and idle cost need device measurements. | **Selected**, contingent on every acceptance gate. |
 | **NetGuard native engine** | Proven Android VPN, TCP/UDP, IPv4/IPv6, UID-aware policy, protected sockets; requires C/JNI. | [NetGuard](https://github.com/M66B/NetGuard) is GPL-3.0 and is an architectural reference only. Copying/linking it would impose incompatible distribution obligations for the intended project licensing. | Mature and optimized for this problem, but carries native audit and update obligations. | Reference only; do not copy or link. |
 | **hev-socks5-tunnel / lwIP tun2socks** | Android, TCP/UDP, and IPv4/IPv6; C/JNI. Its normal topology requires SOCKS5, while this firewall requires direct destinations. | [hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel) is maintained under MIT and uses BSD-style lwIP. | Potentially compact and event driven, but an extra local SOCKS layer adds lifecycle, copies, wakeups, and another policy boundary. | Rejected for this design because SOCKS is unnecessary and must not become a requirement. |
 | **Java/Kotlin NIO plus custom TCP** | UDP is feasible; TCP and future IPv6 would create a new stack. | No dependency license/JNI, but the project would own security-critical protocol code. | High correctness, performance, battery, and security risk. | Rejected and out of scope. |
@@ -76,7 +66,7 @@ Binary size and battery statements are qualitative until measured. The spike mus
 
 ### Licensing implications
 
-No dependency is approved by this provisional ADR. The spike must inventory and pin the selected stack, adapters, and transitive native/Go dependencies; confirm compatibility with the project's distribution; and preserve every required copyright, license, and NOTICE file. gVisor is Apache-2.0, while the exact current Outline/lwIP/go-tun2socks dependency graph must be verified at the pinned revision. GPL/AGPL implementation code, including NetGuard code, must not be copied, translated, linked, or used to derive source structure.
+Outline SDK is published under Apache-2.0; lwIP uses a permissive BSD-style license, and the currently referenced `go-tun2socks` component is permissively licensed. Before dependency adoption, the spike must inventory and pin the exact SDK revision and every transitive native/Go dependency, verify each actual license from that revision, confirm distribution compatibility, and preserve required copyright, license, and NOTICE files. GPL/AGPL implementation code, including NetGuard code, must not be copied, translated, linked, or used to derive source structure. No third-party code or binary is added in this scaffold.
 
 ### Failure behavior
 
