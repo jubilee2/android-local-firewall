@@ -12,8 +12,6 @@ import androidx.core.app.ServiceCompat
 import com.localfirewall.app.R
 
 class FirewallVpnService : VpnService() {
-    private val stateStore by lazy { FirewallServiceStateStore(this) }
-
     companion object {
         const val ACTION_START = "com.localfirewall.app.vpn.action.START"
         const val ACTION_STOP = "com.localfirewall.app.vpn.action.STOP"
@@ -30,7 +28,7 @@ class FirewallVpnService : VpnService() {
         return FirewallServiceCommandHandler(
             start = {
                 startForeground(NOTIFICATION_ID, createNotification())
-                stateStore.setStarted(true)
+                FirewallServiceState.setStarted(true)
             },
             stop = ::stopService,
         ).handle(intent?.action)
@@ -39,8 +37,13 @@ class FirewallVpnService : VpnService() {
     private fun stopService() {
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
-        stateStore.setStarted(false)
+        FirewallServiceState.setStarted(false)
         stopSelf()
+    }
+
+    override fun onDestroy() {
+        FirewallServiceState.setStarted(false)
+        super.onDestroy()
     }
 
     private fun createNotification(): Notification =
