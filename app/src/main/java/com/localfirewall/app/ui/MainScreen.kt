@@ -17,10 +17,10 @@ enum class FirewallStatus(val displayName: String) {
 }
 
 @Composable
-fun AndroidLocalFirewallApp() {
+fun AndroidLocalFirewallApp(onStartFirewall: () -> Unit = {}) {
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
-            MainScreen()
+            MainScreen(onStartFirewall = onStartFirewall)
         }
     }
 }
