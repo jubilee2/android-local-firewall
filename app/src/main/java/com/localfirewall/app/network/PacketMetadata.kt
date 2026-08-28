@@ -21,4 +21,6 @@ data class PacketMetadata(
     /** Fragment offset in eight-byte units. */
     val fragmentOffset: Int,
     val moreFragments: Boolean,
+    /** Android UID owning this flow, or null when ownership could not be determined. */
+    val uid: Int? = null,
 )

@@ -9,6 +9,13 @@ import org.junit.Test
 
 class RuleEngineTest {
     @Test
+    fun `unknown UID does not affect rule evaluation`() {
+        val engine = RuleEngine(emptyList(), defaultAction = FirewallAction.ALLOW)
+
+        assertEquals(FirewallAction.ALLOW, engine.evaluate(packet().copy(uid = null)))
+    }
+
+    @Test
     fun `default policy allows packet`() {
         assertEquals(FirewallAction.ALLOW, RuleEngine(emptyList()).evaluate(packet()))
     }

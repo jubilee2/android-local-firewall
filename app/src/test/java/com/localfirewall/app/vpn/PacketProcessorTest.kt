@@ -2,6 +2,7 @@ package com.localfirewall.app.vpn
 
 import com.localfirewall.app.network.PacketMetadata
 import com.localfirewall.app.network.TransportProtocol
+import com.localfirewall.app.firewall.ConnectionOwnerResolver
 import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -36,6 +37,29 @@ class PacketProcessorTest {
         assertEquals(1, metadata.size)
         assertEquals(TransportProtocol.TCP, metadata.single().protocol)
         assertEquals(443, metadata.single().destinationPort)
+    }
+
+    @Test
+    fun `parsed flow includes resolved owner UID`() {
+        val metadata = mutableListOf<PacketMetadata>()
+        val packet = validIpv4Packet().copyOf(40).also {
+            setUnsignedShort(it, 2, 40)
+            it[9] = 6
+            setUnsignedShort(it, 20, 12345)
+            setUnsignedShort(it, 22, 443)
+            it[32] = 0x50
+        }
+        val processor = PacketProcessor(
+            source = SequenceSource(listOf(packet)),
+            metadataHandler = metadata::add,
+            connectionOwnerResolver = ConnectionOwnerResolver { _, _, _ -> 10055 },
+            dispatcher = Dispatchers.IO,
+        )
+
+        processor.start()
+        awaitStopped(processor)
+
+        assertEquals(10055, metadata.single().uid)
     }
 
     @Test

@@ -9,6 +9,7 @@ import com.localfirewall.app.network.PacketMetadata
 import com.localfirewall.app.network.TcpPacketParser
 import com.localfirewall.app.network.TransportProtocol
 import com.localfirewall.app.network.UdpPacketParser
+import com.localfirewall.app.firewall.ConnectionOwnerResolver
 import java.io.Closeable
 import java.io.FileDescriptor
 import java.io.IOException
@@ -69,6 +70,7 @@ internal class PacketProcessor(
     private val source: PacketSource,
     private val packetHandler: (ByteArray) -> Unit = {},
     private val metadataHandler: (PacketMetadata) -> Unit = {},
+    private val connectionOwnerResolver: ConnectionOwnerResolver? = null,
     private val onUnexpectedTermination: (PacketProcessor) -> Unit = {},
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val bufferSize: Int = DEFAULT_BUFFER_SIZE,
@@ -104,7 +106,9 @@ internal class PacketProcessor(
                 if (length == 0) continue
                 val packet = buffer.copyOf(length)
                 packetHandler(packet)
-                parsePacketMetadata(packet)?.let(metadataHandler)
+                parsePacketMetadata(packet)?.let { metadata ->
+                    metadataHandler(metadata.copy(uid = connectionOwnerResolver?.resolve(metadata)))
+                }
             }
         } catch (_: IOException) {
             // Descriptor closure is expected during shutdown; other I/O failures stop the VPN.
