@@ -2,8 +2,20 @@
 
 ## ADR-001: Use Outline SDK’s lwIP transport bridge
 
-**Status:** accepted for prototyping; dependency adoption still requires an Android integration spike
+**Status:** accepted for prototyping; dependency adoption is blocked pending a successful Android integration spike
 **Research reviewed:** 2026-08-28
+
+> **Spike gate (PR #30): failed.** The proposed revision
+> `6f5902f532d67ffde0c02f9ec19bb176d859f173` was not verified as an immutable
+> commit in `OutlineFoundation/outline-sdk`, and the proposed library contained
+> only project-owned C code returning that string. It did not compile, link,
+> package, or execute `network/lwip2transport`. That implementation has been
+> removed rather than treating a JNI-only packaging test as evidence that the
+> selected dependency integrates. A replacement spike must vendor or
+> reproducibly build a verified pinned upstream revision, generate probe
+> metadata from its single revision file, inventory the actual compiled module
+> graph, and execute the JNI probe on an Android runtime. No forwarding route
+> may be added while this gate is failed.
 
 ### Context and constraints
 
