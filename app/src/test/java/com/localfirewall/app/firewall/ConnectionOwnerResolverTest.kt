@@ -15,29 +15,35 @@ import org.junit.Test
 class ConnectionOwnerResolverTest {
     @Test
     fun `TCP UID is found with source and destination endpoints`() {
-        val resolver = ConnectionOwnerResolver { protocol, local, remote ->
-            assertEquals(OsConstants.IPPROTO_TCP, protocol)
-            assertEquals(InetSocketAddress(address("10.0.0.2"), 43210), local)
-            assertEquals(InetSocketAddress(address("93.184.216.34"), 443), remote)
-            10042
-        }
+        val resolver = ConnectionOwnerResolver(
+            lookup = ConnectionOwnerLookup { protocol, local, remote ->
+                assertEquals(OsConstants.IPPROTO_TCP, protocol)
+                assertEquals(InetSocketAddress(address("10.0.0.2"), 43210), local)
+                assertEquals(InetSocketAddress(address("93.184.216.34"), 443), remote)
+                10042
+            },
+        )
 
         assertEquals(10042, resolver.resolve(packet(TransportProtocol.TCP)))
     }
 
     @Test
     fun `UDP UID is found`() {
-        val resolver = ConnectionOwnerResolver { protocol, _, _ ->
-            assertEquals(OsConstants.IPPROTO_UDP, protocol)
-            10043
-        }
+        val resolver = ConnectionOwnerResolver(
+            lookup = ConnectionOwnerLookup { protocol, _, _ ->
+                assertEquals(OsConstants.IPPROTO_UDP, protocol)
+                10043
+            },
+        )
 
         assertEquals(10043, resolver.resolve(packet(TransportProtocol.UDP)))
     }
 
     @Test
     fun `invalid UID is unknown`() {
-        val resolver = ConnectionOwnerResolver { _, _, _ -> Process.INVALID_UID }
+        val resolver = ConnectionOwnerResolver(
+            lookup = ConnectionOwnerLookup { _, _, _ -> Process.INVALID_UID },
+        )
 
         assertNull(resolver.resolve(packet()))
     }
@@ -45,7 +51,9 @@ class ConnectionOwnerResolverTest {
     @Test
     fun `unsupported protocol and missing ports skip lookup`() {
         val calls = AtomicInteger()
-        val resolver = ConnectionOwnerResolver { _, _, _ -> calls.incrementAndGet() }
+        val resolver = ConnectionOwnerResolver(
+            lookup = ConnectionOwnerLookup { _, _, _ -> calls.incrementAndGet() },
+        )
 
         assertNull(resolver.resolve(packet(protocol = TransportProtocol.ANY)))
         assertNull(resolver.resolve(packet().copy(sourcePort = null)))
@@ -56,7 +64,9 @@ class ConnectionOwnerResolverTest {
     @Test
     fun `non-first fragment skips lookup`() {
         val calls = AtomicInteger()
-        val resolver = ConnectionOwnerResolver { _, _, _ -> calls.incrementAndGet() }
+        val resolver = ConnectionOwnerResolver(
+            lookup = ConnectionOwnerLookup { _, _, _ -> calls.incrementAndGet() },
+        )
 
         assertNull(resolver.resolve(packet().copy(fragmentOffset = 1)))
         assertEquals(0, calls.get())
@@ -64,8 +74,12 @@ class ConnectionOwnerResolverTest {
 
     @Test
     fun `platform lookup failures are unknown`() {
-        val securityFailure = ConnectionOwnerResolver { _, _, _ -> throw SecurityException() }
-        val argumentFailure = ConnectionOwnerResolver { _, _, _ -> throw IllegalArgumentException() }
+        val securityFailure = ConnectionOwnerResolver(
+            lookup = ConnectionOwnerLookup { _, _, _ -> throw SecurityException() },
+        )
+        val argumentFailure = ConnectionOwnerResolver(
+            lookup = ConnectionOwnerLookup { _, _, _ -> throw IllegalArgumentException() },
+        )
 
         assertNull(securityFailure.resolve(packet()))
         assertNull(argumentFailure.resolve(packet()))
@@ -74,10 +88,12 @@ class ConnectionOwnerResolverTest {
     @Test
     fun `resolved flow is served from cache`() {
         val calls = AtomicInteger()
-        val resolver = ConnectionOwnerResolver { _, _, _ ->
-            calls.incrementAndGet()
-            10044
-        }
+        val resolver = ConnectionOwnerResolver(
+            lookup = ConnectionOwnerLookup { _, _, _ ->
+                calls.incrementAndGet()
+                10044
+            },
+        )
 
         assertEquals(10044, resolver.resolve(packet()))
         assertEquals(10044, resolver.resolve(packet()))
@@ -99,6 +115,31 @@ class ConnectionOwnerResolverTest {
         assertNull(cache.get(second))
         assertEquals(1, cache.get(first))
         assertEquals(3, cache.get(third))
+    }
+
+    @Test
+    fun `expired flow is looked up again and can have a new UID`() {
+        var nowNanos = 0L
+        val cache = BoundedFlowUidCache(
+            ttlNanos = 10,
+            clock = MonotonicClock { nowNanos },
+        )
+        val returnedUids = ArrayDeque(listOf(10044, 10099))
+        val calls = AtomicInteger()
+        val resolver = ConnectionOwnerResolver(
+            lookup = ConnectionOwnerLookup { _, _, _ ->
+                calls.incrementAndGet()
+                returnedUids.removeFirst()
+            },
+            cache = cache,
+        )
+
+        assertEquals(10044, resolver.resolve(packet()))
+        nowNanos = 9
+        assertEquals(10044, resolver.resolve(packet()))
+        nowNanos = 10
+        assertEquals(10099, resolver.resolve(packet()))
+        assertEquals(2, calls.get())
     }
 
     private fun packet(protocol: TransportProtocol = TransportProtocol.TCP) = PacketMetadata(

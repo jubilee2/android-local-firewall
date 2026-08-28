@@ -1,8 +1,9 @@
 package com.localfirewall.app.vpn
 
+import com.localfirewall.app.firewall.ConnectionOwnerLookup
+import com.localfirewall.app.firewall.ConnectionOwnerResolver
 import com.localfirewall.app.network.PacketMetadata
 import com.localfirewall.app.network.TransportProtocol
-import com.localfirewall.app.firewall.ConnectionOwnerResolver
 import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -52,7 +53,9 @@ class PacketProcessorTest {
         val processor = PacketProcessor(
             source = SequenceSource(listOf(packet)),
             metadataHandler = metadata::add,
-            connectionOwnerResolver = ConnectionOwnerResolver { _, _, _ -> 10055 },
+            connectionOwnerResolver = ConnectionOwnerResolver(
+                lookup = ConnectionOwnerLookup { _, _, _ -> 10055 },
+            ),
             dispatcher = Dispatchers.IO,
         )
 

@@ -4,12 +4,12 @@ import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
 import android.system.StructPollfd
+import com.localfirewall.app.firewall.ConnectionOwnerResolver
 import com.localfirewall.app.network.IPv4PacketParser
 import com.localfirewall.app.network.PacketMetadata
 import com.localfirewall.app.network.TcpPacketParser
 import com.localfirewall.app.network.TransportProtocol
 import com.localfirewall.app.network.UdpPacketParser
-import com.localfirewall.app.firewall.ConnectionOwnerResolver
 import java.io.Closeable
 import java.io.FileDescriptor
 import java.io.IOException

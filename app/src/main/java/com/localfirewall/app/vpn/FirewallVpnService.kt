@@ -6,8 +6,8 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.net.VpnService
 import android.net.ConnectivityManager
+import android.net.VpnService
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -15,10 +15,10 @@ import android.os.ParcelFileDescriptor
 import android.system.OsConstants
 import androidx.core.app.ServiceCompat
 import com.localfirewall.app.R
-import com.localfirewall.app.firewall.FragmentDecisionEngine
-import com.localfirewall.app.firewall.RuleEngine
 import com.localfirewall.app.firewall.AndroidConnectionOwnerLookup
 import com.localfirewall.app.firewall.ConnectionOwnerResolver
+import com.localfirewall.app.firewall.FragmentDecisionEngine
+import com.localfirewall.app.firewall.RuleEngine
 import java.io.Closeable
 
 class FirewallVpnService : VpnService() {
