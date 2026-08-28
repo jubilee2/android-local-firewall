@@ -42,5 +42,17 @@ class FirewallVpnServiceManifestTest {
             "ForegroundServicePermission",
             service.attributes.getNamedItemNS(toolsNamespace, "ignore").nodeValue,
         )
+
+        val alwaysOnMetadata = service.childNodes
+            .let { nodes -> (0 until nodes.length).map(nodes::item) }
+            .single {
+                it.nodeName == "meta-data" &&
+                    it.attributes.getNamedItemNS(androidNamespace, "name").nodeValue ==
+                    "android.net.VpnService.SUPPORTS_ALWAYS_ON"
+            }
+        assertEquals(
+            "false",
+            alwaysOnMetadata.attributes.getNamedItemNS(androidNamespace, "value").nodeValue,
+        )
     }
 }

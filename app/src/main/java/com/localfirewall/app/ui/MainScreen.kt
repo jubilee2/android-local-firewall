@@ -14,13 +14,22 @@ import androidx.compose.ui.tooling.preview.Preview
 
 enum class FirewallStatus(val displayName: String) {
     OFF("OFF"),
+    STARTED("STARTED"),
 }
 
 @Composable
-fun AndroidLocalFirewallApp(onStartFirewall: () -> Unit = {}) {
+fun AndroidLocalFirewallApp(
+    serviceStarted: Boolean = false,
+    onStartFirewall: () -> Unit = {},
+    onStopFirewall: () -> Unit = {},
+) {
     MaterialTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
-            MainScreen(onStartFirewall = onStartFirewall)
+            MainScreen(
+                status = if (serviceStarted) FirewallStatus.STARTED else FirewallStatus.OFF,
+                onStartFirewall = onStartFirewall,
+                onStopFirewall = onStopFirewall,
+            )
         }
     }
 }
@@ -29,6 +38,7 @@ fun AndroidLocalFirewallApp(onStartFirewall: () -> Unit = {}) {
 fun MainScreen(
     status: FirewallStatus = FirewallStatus.OFF,
     onStartFirewall: () -> Unit = {},
+    onStopFirewall: () -> Unit = {},
 ) {
     Column(
         modifier = Modifier.fillMaxSize(),
@@ -43,8 +53,9 @@ fun MainScreen(
             text = "Firewall: ${status.displayName}",
             style = MaterialTheme.typography.titleLarge,
         )
-        Button(onClick = onStartFirewall) {
-            Text("Start Firewall")
+        val isStarted = status == FirewallStatus.STARTED
+        Button(onClick = if (isStarted) onStopFirewall else onStartFirewall) {
+            Text(if (isStarted) "Stop Firewall" else "Start Firewall")
         }
     }
 }
