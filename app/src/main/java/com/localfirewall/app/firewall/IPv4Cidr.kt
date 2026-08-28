@@ -3,7 +3,7 @@ package com.localfirewall.app.firewall
 import java.net.Inet4Address
 import java.net.InetAddress
 
-/** An IPv4 subnet with a canonical network address. The all-addresses /0 is out of scope. */
+/** An IPv4 subnet with a canonical network address. */
 data class IPv4Cidr private constructor(
     private val network: Int,
     val prefixLength: Int,
@@ -20,7 +20,7 @@ data class IPv4Cidr private constructor(
             require(parts.size == 2) { "CIDR must contain one '/'" }
             val address = parseIPv4(parts[0])
             val prefixLength = parts[1].toIntOrNull()
-            require(prefixLength in 1..32) { "IPv4 prefix length must be between 1 and 32" }
+            require(prefixLength in 0..32) { "IPv4 prefix length must be between 0 and 32" }
             val mask = prefixMask(requireNotNull(prefixLength))
             return IPv4Cidr(address.toInt() and mask, prefixLength)
         }
@@ -43,4 +43,5 @@ private fun InetAddress.toInt(): Int = address.fold(0) { result, byte ->
     (result shl 8) or (byte.toInt() and 0xff)
 }
 
-private fun prefixMask(prefixLength: Int): Int = -1 shl (32 - prefixLength)
+private fun prefixMask(prefixLength: Int): Int =
+    if (prefixLength == 0) 0 else -1 shl (32 - prefixLength)
