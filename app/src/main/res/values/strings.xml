@@ -1,5 +1,5 @@
 <resources>
     <string name="app_name">Android Local Firewall</string>
-    <string name="firewall_notification_title">Firewall is active</string>
-    <string name="firewall_notification_text">Filtering network traffic on this device</string>
+    <string name="firewall_notification_title">Firewall service starting</string>
+    <string name="firewall_notification_text">Preparing the local VPN firewall</string>
 </resources>
