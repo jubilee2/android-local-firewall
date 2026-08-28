@@ -8,6 +8,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.system.OsConstants
 import androidx.core.app.ServiceCompat
@@ -16,6 +18,8 @@ import java.io.Closeable
 
 class FirewallVpnService : VpnService() {
     private val vpnInterface = VpnInterfaceLifecycle<ParcelFileDescriptor>()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var packetProcessor: PacketProcessor? = null
 
     companion object {
         const val ACTION_START = "com.localfirewall.app.vpn.action.START"
@@ -35,7 +39,9 @@ class FirewallVpnService : VpnService() {
         return FirewallServiceCommandHandler(
             start = {
                 startForeground(NOTIFICATION_ID, createNotification())
-                if (establishVpnInterface() != null) {
+                val tunInterface = establishVpnInterface()
+                if (tunInterface != null) {
+                    startPacketProcessor(tunInterface)
                     FirewallServiceState.setStarted(true)
                     true
                 } else {
@@ -48,6 +54,8 @@ class FirewallVpnService : VpnService() {
     }
 
     private fun stopService() {
+        stopPacketProcessor()
+        // ParcelFileDescriptor owns the TUN descriptor and is released after polling is canceled.
         vpnInterface.close()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
@@ -56,6 +64,8 @@ class FirewallVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        stopPacketProcessor()
+        // This is idempotent and releases the descriptor after packet polling is canceled.
         vpnInterface.close()
         FirewallServiceState.setStarted(false)
         super.onDestroy()
@@ -75,6 +85,23 @@ class FirewallVpnService : VpnService() {
     } catch (_: SecurityException) {
         vpnInterface.close()
         null
+    }
+
+    private fun startPacketProcessor(tunInterface: ParcelFileDescriptor) {
+        if (packetProcessor != null) return
+        packetProcessor = PacketProcessor(
+            PollingTunPacketSource(tunInterface.fileDescriptor),
+            onUnexpectedTermination = { terminatedProcessor ->
+                mainHandler.post {
+                    if (packetProcessor === terminatedProcessor) stopService()
+                }
+            },
+        ).also(PacketProcessor::start)
+    }
+
+    private fun stopPacketProcessor() {
+        packetProcessor?.close()
+        packetProcessor = null
     }
 
     private fun createNotification(): Notification =
