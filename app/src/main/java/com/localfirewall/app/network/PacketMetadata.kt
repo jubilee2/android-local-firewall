@@ -16,4 +16,9 @@ data class PacketMetadata(
     val protocol: TransportProtocol,
     val sourcePort: Int?,
     val destinationPort: Int?,
+    /** IPv4 Identification field used with addresses and protocol to identify a datagram. */
+    val identification: Int,
+    /** Fragment offset in eight-byte units. */
+    val fragmentOffset: Int,
+    val moreFragments: Boolean,
 )

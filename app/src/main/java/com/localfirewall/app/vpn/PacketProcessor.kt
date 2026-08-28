@@ -157,5 +157,8 @@ private fun parsePacketMetadata(packet: ByteArray): PacketMetadata? {
         protocol = protocol,
         sourcePort = transport?.sourcePort,
         destinationPort = transport?.destinationPort,
+        identification = ipv4.identification,
+        fragmentOffset = ipv4.fragmentOffset,
+        moreFragments = ipv4.moreFragments,
     )
 }

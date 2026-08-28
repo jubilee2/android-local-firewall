@@ -43,6 +43,7 @@ class PacketProcessorTest {
         val metadata = mutableListOf<PacketMetadata>()
         val packet = validIpv4Packet().also {
             it[9] = 17
+            setUnsignedShort(it, 4, 0x1234)
             setUnsignedShort(it, 6, 1)
         }
         val processor = PacketProcessor(
@@ -55,9 +56,13 @@ class PacketProcessorTest {
         awaitStopped(processor)
 
         assertEquals(TransportProtocol.UDP, metadata.single().protocol)
+        assertEquals(0x1234, metadata.single().identification)
+        assertEquals(1, metadata.single().fragmentOffset)
+        assertFalse(metadata.single().moreFragments)
         assertEquals(null, metadata.single().sourcePort)
         assertEquals(null, metadata.single().destinationPort)
     }
+
     @Test
     fun `one packet is passed to the handler`() {
         val packets = mutableListOf<ByteArray>()

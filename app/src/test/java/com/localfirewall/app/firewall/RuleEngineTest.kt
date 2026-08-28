@@ -103,6 +103,9 @@ class RuleEngineTest {
         protocol = protocol,
         sourcePort = if (port == null) null else 12345,
         destinationPort = port,
+        identification = 1,
+        fragmentOffset = 0,
+        moreFragments = false,
     )
 
     private fun ipv4(value: String): Inet4Address = InetAddress.getByName(value) as Inet4Address
