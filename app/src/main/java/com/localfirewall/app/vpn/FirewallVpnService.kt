@@ -1,12 +1,13 @@
 package com.localfirewall.app.vpn
 
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
+import com.localfirewall.app.R
 
 class FirewallVpnService : VpnService() {
 
@@ -21,8 +22,18 @@ class FirewallVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        return Service.START_STICKY
+        startForeground(NOTIFICATION_ID, createNotification())
+        return START_STICKY
     }
+
+    private fun createNotification(): Notification =
+        Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle(getString(R.string.firewall_notification_title))
+            .setContentText(getString(R.string.firewall_notification_text))
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .setOngoing(true)
+            .build()
 
     override fun onDestroy() {
         super.onDestroy()
