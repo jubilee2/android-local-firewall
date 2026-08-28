@@ -89,17 +89,66 @@ For every change:
 
 1. Understand the existing architecture.
 2. Make the smallest reasonable change.
-3. Add or update tests.
-4. Run unit tests.
-5. Run Android lint.
-6. Build the application.
-7. Do not merge code that does not compile.
+3. Add or update tests for behavioral production-code changes where appropriate.
+4. Keep production call sites, unit tests, instrumentation tests, test helpers,
+   mocks/fakes, and fixtures consistent with production APIs.
+5. Run unit tests.
+6. Run Android lint.
+7. Build the application.
+8. Do not merge or report a task as complete if the code does not compile or any
+   required test, lint, or build command fails.
 
-Commands should include:
+Whenever changing a production API, perform a repository-wide search for every
+usage before considering the change complete. Production APIs include function
+signatures, constructor parameters, callback parameters, interfaces, data
+classes, public or internal methods, and helper functions used by tests.
 
+Explicitly check and update all affected:
+
+- production call sites
+- unit tests
+- instrumentation tests
+- test helpers
+- mocks and fakes
+- fixtures
+
+When adding, removing, or reordering parameters, never assume existing callers
+still compile. Search for every call site and update all callers in the same
+change. If a production-code change causes test compilation errors, the
+implementation is incomplete; do not treat the failure as merely a test
+problem.
+
+In Kotlin tests, prefer named arguments for functions or constructors with
+multiple callback or function parameters, especially when parameters have
+similar function types. This reduces accidental argument binding after API
+changes.
+
+Before finishing any implementation or pull request, run all of these commands:
+
+```bash
 ./gradlew test
 ./gradlew lint
 ./gradlew assembleDebug
+```
+
+Do not report the task as complete if any command fails. Before finalizing a
+pull request, perform this consistency check:
+
+```text
+production API changed?
+    ↓
+search all usages
+    ↓
+update production callers
+    ↓
+update tests/test helpers
+    ↓
+run test
+    ↓
+run lint
+    ↓
+build APK
+```
 
 ---
 
