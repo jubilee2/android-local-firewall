@@ -7,6 +7,8 @@ data class IPv4PacketMetadata(
     val version: Int,
     val headerLength: Int,
     val totalLength: Int,
+    /** IPv4 Identification field used to associate fragments of one datagram. */
+    val identification: Int,
     val protocol: Int,
     val sourceAddress: InetAddress,
     val destinationAddress: InetAddress,

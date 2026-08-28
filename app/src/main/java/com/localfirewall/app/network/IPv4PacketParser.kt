@@ -28,6 +28,7 @@ object IPv4PacketParser {
             version = version,
             headerLength = headerLength,
             totalLength = totalLength,
+            identification = unsignedShort(packet, 4),
             protocol = packet[9].toInt() and 0xff,
             sourceAddress = addressFrom(packet, 12),
             destinationAddress = addressFrom(packet, 16),

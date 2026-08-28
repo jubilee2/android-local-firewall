@@ -39,6 +39,11 @@ class IPv4PacketParserTest {
     }
 
     @Test
+    fun `extracts IPv4 identification`() {
+        assertEquals(0x1234, IPv4PacketParser.parse(packet(identification = 0x1234))?.identification)
+    }
+
+    @Test
     fun `rejects non-IPv4 version`() {
         assertNull(IPv4PacketParser.parse(packet().also { it[0] = 0x65 }))
     }
@@ -96,9 +101,11 @@ class IPv4PacketParserTest {
         headerLength: Int = 20,
         protocol: Int = 0,
         fragmentation: Int = 0,
+        identification: Int = 0,
     ): ByteArray = ByteArray(headerLength).also { packet ->
         packet[0] = ((4 shl 4) or (headerLength / 4)).toByte()
         setUnsignedShort(packet, 2, headerLength)
+        setUnsignedShort(packet, 4, identification)
         setUnsignedShort(packet, 6, fragmentation)
         packet[9] = protocol.toByte()
         byteArrayOf(192.toByte(), 0, 2, 1).copyInto(packet, 12)
