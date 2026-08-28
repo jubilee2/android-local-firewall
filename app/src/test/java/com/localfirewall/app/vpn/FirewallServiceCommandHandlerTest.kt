@@ -26,7 +26,17 @@ class FirewallServiceCommandHandlerTest {
 
         assertTrue(started)
         assertFalse(stopped)
-        assertEquals(Service.START_STICKY, result)
+        assertEquals(Service.START_REDELIVER_INTENT, result)
+    }
+
+    @Test
+    fun `start command requests intent redelivery after service restart`() {
+        val result = FirewallServiceCommandHandler(
+            start = {},
+            stop = {},
+        ).handle(FirewallVpnService.ACTION_START)
+
+        assertEquals(Service.START_REDELIVER_INTENT, result)
     }
 
     @Test

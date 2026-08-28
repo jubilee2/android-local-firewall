@@ -12,11 +12,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import com.localfirewall.app.ui.AndroidLocalFirewallApp
+import com.localfirewall.app.vpn.FirewallServiceStateStore
 import com.localfirewall.app.vpn.FirewallVpnService
 import com.localfirewall.app.vpn.VpnPermissionAction
 import com.localfirewall.app.vpn.VpnPermissionDecision
 
 class MainActivity : ComponentActivity() {
+    private val serviceStateStore by lazy { FirewallServiceStateStore(this) }
     private var serviceStarted by mutableStateOf(false)
 
     private val vpnPermissionLauncher = registerForActivityResult(
@@ -29,6 +31,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        serviceStarted = serviceStateStore.isStarted()
         setContent {
             AndroidLocalFirewallApp(
                 serviceStarted = serviceStarted,
@@ -36,6 +39,11 @@ class MainActivity : ComponentActivity() {
                 onStopFirewall = ::stopFirewallService,
             )
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        serviceStarted = serviceStateStore.isStarted()
     }
 
     private fun requestVpnPermission() {
@@ -62,6 +70,7 @@ class MainActivity : ComponentActivity() {
             action = FirewallVpnService.ACTION_START
         }
         ContextCompat.startForegroundService(this, intent)
+        serviceStateStore.setStarted(true)
         serviceStarted = true
     }
 
@@ -70,6 +79,7 @@ class MainActivity : ComponentActivity() {
             action = FirewallVpnService.ACTION_STOP
         }
         startService(intent)
+        serviceStateStore.setStarted(false)
         serviceStarted = false
     }
 }

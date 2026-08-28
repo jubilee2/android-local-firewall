@@ -3,6 +3,7 @@ package com.localfirewall.app.vpn
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.net.VpnService
@@ -11,6 +12,7 @@ import androidx.core.app.ServiceCompat
 import com.localfirewall.app.R
 
 class FirewallVpnService : VpnService() {
+    private val stateStore by lazy { FirewallServiceStateStore(this) }
 
     companion object {
         const val ACTION_START = "com.localfirewall.app.vpn.action.START"
@@ -26,7 +28,10 @@ class FirewallVpnService : VpnService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         return FirewallServiceCommandHandler(
-            start = { startForeground(NOTIFICATION_ID, createNotification()) },
+            start = {
+                startForeground(NOTIFICATION_ID, createNotification())
+                stateStore.setStarted(true)
+            },
             stop = ::stopService,
         ).handle(intent?.action)
     }
@@ -34,6 +39,7 @@ class FirewallVpnService : VpnService() {
     private fun stopService() {
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
+        stateStore.setStarted(false)
         stopSelf()
     }
 
@@ -68,12 +74,12 @@ internal class FirewallServiceCommandHandler(
     fun handle(action: String?): Int = when (action) {
         FirewallVpnService.ACTION_START -> {
             start()
-            FirewallVpnService.START_STICKY
+            Service.START_REDELIVER_INTENT
         }
         FirewallVpnService.ACTION_STOP -> {
             stop()
-            FirewallVpnService.START_NOT_STICKY
+            Service.START_NOT_STICKY
         }
-        else -> FirewallVpnService.START_NOT_STICKY
+        else -> Service.START_NOT_STICKY
     }
 }
