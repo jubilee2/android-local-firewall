@@ -9,6 +9,7 @@ import android.content.Intent
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.system.OsConstants
 import androidx.core.app.ServiceCompat
 import com.localfirewall.app.R
 import java.io.Closeable
@@ -65,6 +66,7 @@ class FirewallVpnService : VpnService() {
             Builder()
                 .setSession(getString(R.string.vpn_session_name))
                 .addAddress(VPN_ADDRESS, VPN_PREFIX_LENGTH)
+                .allowFamily(OsConstants.AF_INET6)
                 .establish()
         }
     } catch (_: IllegalStateException) {
