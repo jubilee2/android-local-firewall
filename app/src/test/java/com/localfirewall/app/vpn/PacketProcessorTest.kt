@@ -1,5 +1,7 @@
 package com.localfirewall.app.vpn
 
+import com.localfirewall.app.network.PacketMetadata
+import com.localfirewall.app.network.TransportProtocol
 import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -12,6 +14,50 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PacketProcessorTest {
+    @Test
+    fun `parsed TCP headers are converted to unified metadata`() {
+        val metadata = mutableListOf<PacketMetadata>()
+        val packet = validIpv4Packet().copyOf(40).also {
+            setUnsignedShort(it, 2, 40)
+            it[9] = 6
+            setUnsignedShort(it, 20, 12345)
+            setUnsignedShort(it, 22, 443)
+            it[32] = 0x50
+        }
+        val processor = PacketProcessor(
+            source = SequenceSource(listOf(packet)),
+            metadataHandler = metadata::add,
+            dispatcher = Dispatchers.IO,
+        )
+
+        processor.start()
+        awaitStopped(processor)
+
+        assertEquals(1, metadata.size)
+        assertEquals(TransportProtocol.TCP, metadata.single().protocol)
+        assertEquals(443, metadata.single().destinationPort)
+    }
+
+    @Test
+    fun `non-first fragment metadata has no invented ports`() {
+        val metadata = mutableListOf<PacketMetadata>()
+        val packet = validIpv4Packet().also {
+            it[9] = 17
+            setUnsignedShort(it, 6, 1)
+        }
+        val processor = PacketProcessor(
+            source = SequenceSource(listOf(packet)),
+            metadataHandler = metadata::add,
+            dispatcher = Dispatchers.IO,
+        )
+
+        processor.start()
+        awaitStopped(processor)
+
+        assertEquals(TransportProtocol.UDP, metadata.single().protocol)
+        assertEquals(null, metadata.single().sourcePort)
+        assertEquals(null, metadata.single().destinationPort)
+    }
     @Test
     fun `one packet is passed to the handler`() {
         val packets = mutableListOf<ByteArray>()
@@ -187,6 +233,11 @@ class PacketProcessorTest {
             Thread.sleep(10)
         }
         error("packet processor did not stop")
+    }
+
+    private fun setUnsignedShort(packet: ByteArray, offset: Int, value: Int) {
+        packet[offset] = (value ushr 8).toByte()
+        packet[offset + 1] = value.toByte()
     }
 
     private class SequenceSource(private val packets: List<ByteArray>) : PacketSource {

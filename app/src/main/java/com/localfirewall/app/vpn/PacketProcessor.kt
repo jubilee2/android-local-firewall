@@ -5,7 +5,9 @@ import android.system.Os
 import android.system.OsConstants
 import android.system.StructPollfd
 import com.localfirewall.app.network.IPv4PacketParser
+import com.localfirewall.app.network.PacketMetadata
 import com.localfirewall.app.network.TcpPacketParser
+import com.localfirewall.app.network.TransportProtocol
 import com.localfirewall.app.network.UdpPacketParser
 import java.io.Closeable
 import java.io.FileDescriptor
@@ -65,7 +67,8 @@ internal class PollingTunPacketSource(
 /** Consumes packets from a TUN source on a dedicated background coroutine. */
 internal class PacketProcessor(
     private val source: PacketSource,
-    private val packetHandler: (ByteArray) -> Unit = ::parsePacketMetadata,
+    private val packetHandler: (ByteArray) -> Unit = {},
+    private val metadataHandler: (PacketMetadata) -> Unit = {},
     private val onUnexpectedTermination: (PacketProcessor) -> Unit = {},
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val bufferSize: Int = DEFAULT_BUFFER_SIZE,
@@ -99,7 +102,9 @@ internal class PacketProcessor(
                     break
                 }
                 if (length == 0) continue
-                packetHandler(buffer.copyOf(length))
+                val packet = buffer.copyOf(length)
+                packetHandler(packet)
+                parsePacketMetadata(packet)?.let(metadataHandler)
             }
         } catch (_: IOException) {
             // Descriptor closure is expected during shutdown; other I/O failures stop the VPN.
@@ -134,10 +139,23 @@ internal class PacketProcessor(
 }
 
 /** Parses header metadata only; packet bytes and parsed results are deliberately not retained. */
-private fun parsePacketMetadata(packet: ByteArray) {
-    val ipv4 = IPv4PacketParser.parse(packet) ?: return
-    when (ipv4.protocol) {
-        6 -> TcpPacketParser.parse(packet, ipv4)
-        17 -> UdpPacketParser.parse(packet, ipv4)
+private fun parsePacketMetadata(packet: ByteArray): PacketMetadata? {
+    val ipv4 = IPv4PacketParser.parse(packet) ?: return null
+    val protocol = when (ipv4.protocol) {
+        6 -> TransportProtocol.TCP
+        17 -> TransportProtocol.UDP
+        else -> TransportProtocol.ANY
     }
+    val transport = when (protocol) {
+        TransportProtocol.TCP -> TcpPacketParser.parse(packet, ipv4)
+        TransportProtocol.UDP -> UdpPacketParser.parse(packet, ipv4)
+        TransportProtocol.ANY -> null
+    }
+    return PacketMetadata(
+        sourceAddress = ipv4.sourceAddress,
+        destinationAddress = ipv4.destinationAddress,
+        protocol = protocol,
+        sourcePort = transport?.sourcePort,
+        destinationPort = transport?.destinationPort,
+    )
 }
