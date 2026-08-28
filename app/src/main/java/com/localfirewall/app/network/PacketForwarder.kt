@@ -1,7 +1,7 @@
 package com.localfirewall.app.network
 
 /**
- * Owns the future userspace network stack that forwards packets from the VPN TUN interface.
+ * Owns the future Outline/lwIP bridge that forwards packets from the VPN TUN interface.
  *
  * Implementations must not return from [start] until their resources are ready, and [stop]
  * must be safe after a partially failed start. The VPN service must not install a default route
