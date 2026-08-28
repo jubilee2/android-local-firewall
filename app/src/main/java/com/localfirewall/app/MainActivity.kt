@@ -7,6 +7,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import com.localfirewall.app.ui.AndroidLocalFirewallApp
 import com.localfirewall.app.vpn.FirewallVpnService
@@ -14,6 +17,8 @@ import com.localfirewall.app.vpn.VpnPermissionAction
 import com.localfirewall.app.vpn.VpnPermissionDecision
 
 class MainActivity : ComponentActivity() {
+    private var serviceStarted by mutableStateOf(false)
+
     private val vpnPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -25,7 +30,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            AndroidLocalFirewallApp(onStartFirewall = ::requestVpnPermission)
+            AndroidLocalFirewallApp(
+                serviceStarted = serviceStarted,
+                onStartFirewall = ::requestVpnPermission,
+                onStopFirewall = ::stopFirewallService,
+            )
         }
     }
 
@@ -49,6 +58,18 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startFirewallService() {
-        ContextCompat.startForegroundService(this, Intent(this, FirewallVpnService::class.java))
+        val intent = Intent(this, FirewallVpnService::class.java).apply {
+            action = FirewallVpnService.ACTION_START
+        }
+        ContextCompat.startForegroundService(this, intent)
+        serviceStarted = true
+    }
+
+    private fun stopFirewallService() {
+        val intent = Intent(this, FirewallVpnService::class.java).apply {
+            action = FirewallVpnService.ACTION_STOP
+        }
+        startService(intent)
+        serviceStarted = false
     }
 }

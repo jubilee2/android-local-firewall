@@ -8,4 +8,9 @@ class FirewallStatusTest {
     fun `initial firewall status is displayed as off`() {
         assertEquals("OFF", FirewallStatus.OFF.displayName)
     }
+
+    @Test
+    fun `started status uses neutral wording`() {
+        assertEquals("STARTED", FirewallStatus.STARTED.displayName)
+    }
 }

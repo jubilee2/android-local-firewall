@@ -7,11 +7,14 @@ import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
+import androidx.core.app.ServiceCompat
 import com.localfirewall.app.R
 
 class FirewallVpnService : VpnService() {
 
     companion object {
+        const val ACTION_START = "com.localfirewall.app.vpn.action.START"
+        const val ACTION_STOP = "com.localfirewall.app.vpn.action.STOP"
         const val NOTIFICATION_CHANNEL_ID = "firewall_vpn"
         const val NOTIFICATION_ID = 1001
     }
@@ -22,8 +25,16 @@ class FirewallVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, createNotification())
-        return START_STICKY
+        return FirewallServiceCommandHandler(
+            start = { startForeground(NOTIFICATION_ID, createNotification()) },
+            stop = ::stopService,
+        ).handle(intent?.action)
+    }
+
+    private fun stopService() {
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
+        stopSelf()
     }
 
     private fun createNotification(): Notification =
@@ -34,10 +45,6 @@ class FirewallVpnService : VpnService() {
             .setCategory(Notification.CATEGORY_SERVICE)
             .setOngoing(true)
             .build()
-
-    override fun onDestroy() {
-        super.onDestroy()
-    }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -51,5 +58,22 @@ class FirewallVpnService : VpnService() {
                 getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannel(channel)
         }
+    }
+}
+
+internal class FirewallServiceCommandHandler(
+    private val start: () -> Unit,
+    private val stop: () -> Unit,
+) {
+    fun handle(action: String?): Int = when (action) {
+        FirewallVpnService.ACTION_START -> {
+            start()
+            FirewallVpnService.START_STICKY
+        }
+        FirewallVpnService.ACTION_STOP -> {
+            stop()
+            FirewallVpnService.START_NOT_STICKY
+        }
+        else -> FirewallVpnService.START_NOT_STICKY
     }
 }
