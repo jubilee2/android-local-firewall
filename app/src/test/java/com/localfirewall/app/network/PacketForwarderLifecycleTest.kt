@@ -69,6 +69,20 @@ class PacketForwarderLifecycleTest {
     }
 
     @Test
+    fun `linkage failure during start cleans candidate and permits retry`() {
+        val failed = RecordingForwarder(startFailure = UnsatisfiedLinkError("native library missing"))
+        val replacement = RecordingForwarder()
+        val candidates = ArrayDeque(listOf(failed, replacement))
+        val lifecycle = PacketForwarderLifecycle { candidates.removeFirst() }
+
+        assertThrows(UnsatisfiedLinkError::class.java) { lifecycle.start() }
+        lifecycle.start()
+
+        assertEquals(1, failed.stopCount)
+        assertEquals(1, replacement.startCount)
+    }
+
+    @Test
     fun `stop failure still permits a new forwarder`() {
         val failed = RecordingForwarder(stopFailure = IllegalStateException("stop failed"))
         val replacement = RecordingForwarder()

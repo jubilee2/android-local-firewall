@@ -1,92 +1,108 @@
 # Forwarding architecture decisions
 
-## ADR-001: Embed a maintained userspace network stack
+## ADR-001: Prototype an existing userspace network stack
 
-**Status:** selected for a future implementation (prototype boundary only)
+**Status:** provisional; native-stack selection requires an Android spike
 **Research reviewed:** 2026-08-28
 
 ### Context and constraints
 
-A TUN file descriptor supplies IP packets, not socket byte streams. In particular, a TCP packet cannot be written to a Java `Socket`: TCP connection state, sequencing, acknowledgements, retransmission, congestion/flow control, and teardown must be implemented by a network stack. The firewall must remain entirely on-device, handle TCP and UDP, and must not depend on a remote VPN or proxy server. We will not create a new TCP/IP stack.
+A TUN file descriptor supplies IP packets, not socket byte streams. In particular, a TCP packet cannot be written to a Java `Socket`: TCP connection state, sequencing, acknowledgements, retransmission, congestion/flow control, and teardown require a network stack. The firewall must remain entirely on-device, handle TCP and UDP, and must not depend on a remote VPN, backend, proxy, or SOCKS server. We will not create a TCP/IP stack.
 
-No default IPv4 or IPv6 route is added by this decision. Capturing all traffic is deferred until an ALLOW path is implemented, protected against VPN recursion, and tested end-to-end.
+No default IPv4 or IPv6 route is added by this decision. Capturing all traffic is deferred until a working ALLOW path is protected against VPN recursion and tested end-to-end.
 
-### Decision
+### Provisional decision
 
-Use **gVisor netstack**, consumed through a small, pinned Apache-2.0-licensed Go/JNI adapter, as the userspace TCP/IP stack. Treat the maintained [Outline SDK tun2socks implementation](https://github.com/Jigsaw-Code/outline-sdk/tree/main/x/tun2socks) as the primary integration reference and upstream packaging candidate. The adapter will put the TUN file descriptor into netstack, accept local TCP and UDP flows, and relay allowed flows to ordinary OS sockets connected directly to the original destination. It will not configure or contact a SOCKS server: “tun2socks” describes the reusable TUN-to-stream/datagram machinery, not this application's deployment topology.
+Use a mature, maintained userspace stack behind the Kotlin `PacketForwarder` boundary. Select the exact stack only after an Android spike compares the following distinct options and proves all acceptance gates below:
 
-Before implementation, a spike must pin an exact Outline SDK/gVisor revision and prove Android API 29–35 builds for every shipped ABI, TCP and UDP forwarding, FD protection before connect/send, shutdown, and IPv4. If the reusable Outline boundary cannot support a direct protected dialer without copying substantial code, build the thin adapter against [gVisor's `pkg/tcpip` netstack](https://github.com/google/gvisor/tree/master/pkg/tcpip) instead. This is one selected architecture (embedded gVisor netstack), with two packaging options—not a fallback to a custom stack.
+#### Option A: direct gVisor netstack integration
 
-The Kotlin boundary is `PacketForwarder`. Its implementation will own the TUN duplicate/JNI handle, native stack, flow tables, protected outbound sockets, and worker threads. `PacketForwarderLifecycle` makes start/stop idempotent and cleans up a partially started implementation. This issue intentionally supplies no native binary and does not connect the boundary to `FirewallVpnService` yet.
+Build a thin, pinned Go/JNI adapter directly against [gVisor `pkg/tcpip`](https://github.com/google/gvisor/tree/master/pkg/tcpip). The adapter would feed TUN packets to gVisor netstack, admit TCP and UDP flows, and relay allowed flows through protected OS sockets connected directly to their original destinations. This option uses gVisor's TCP/IP implementation; it does **not** use or claim to package an Outline TUN integration.
 
-### Planned forwarding path
+[Outline SDK](https://github.com/OutlineFoundation/outline-sdk) may inform lifecycle, relay, and mobile API design, but is an architectural reference only for Option A. It is not evidence that gVisor integrates with current Outline SDK.
+
+#### Option B: current Outline SDK lwIP integration
+
+Spike the current `OutlineFoundation/outline-sdk` [`network/lwip2transport`](https://github.com/OutlineFoundation/outline-sdk/tree/main/network/lwip2transport) and PacketRelay design. Current module paths are [`golang.getoutline.org/sdk`](https://pkg.go.dev/golang.getoutline.org/sdk) and [`golang.getoutline.org/sdk/x`](https://pkg.go.dev/golang.getoutline.org/sdk/x); the former Jigsaw module paths are deprecated. This integration uses **lwIP**, and its current [`go.mod`](https://github.com/OutlineFoundation/outline-sdk/blob/main/go.mod) depends on `github.com/eycorsican/go-tun2socks`. It is not gVisor-based, and no nonexistent `x/tun2socks` package is assumed.
+
+The spike must determine whether PacketRelay/lwIP can expose a direct original-destination TCP and UDP transport with a synchronous pre-connect/pre-send Android socket-protection hook. A design that requires a SOCKS server, remote proxy, or backend does not qualify.
+
+Neither option is selected yet. No native dependency or binary is added by this ADR. The eventual implementation will own the TUN duplicate/JNI handle, native stack, flow table, protected outbound sockets, and workers. `PacketForwarderLifecycle` only establishes lifecycle and cleanup semantics; it is intentionally not connected to `FirewallVpnService` yet.
+
+### Required forwarding path
 
 ```text
 TUN packet
-  -> gVisor IP/TCP/UDP processing and flow creation
-  -> flow metadata + Android UID resolution
+  -> selected existing userspace IP/TCP/UDP stack
+  -> new-flow metadata + Android UID resolution
   -> RuleEngine decision
-       BLOCK -> reject/drop inside the local stack; create no Internet socket
+       BLOCK -> reject/drop; create no Internet socket
        ALLOW -> create OS TCP/UDP socket -> VpnService.protect(fd) -> connect/send
-  -> relay response through gVisor -> TUN
+  -> relay response through userspace stack -> TUN
 ```
 
 #### Firewall and UID hook
 
-The hook is at **new-flow admission, before the host socket is created or receives payload**. The adapter reports the original IP version, protocol, source/destination address, and ports to Kotlin. Kotlin resolves the UID with Android's `ConnectivityManager.getConnectionOwnerUid()` mechanism already wrapped by `ConnectionOwnerResolver`, caches the decision by flow key, and invokes `RuleEngine`. Non-initial fragments remain governed by the existing fragment decision cache. A missing/ambiguous UID is not silently treated as allowed; the eventual policy must explicitly handle `UID_UNKNOWN`.
+The hook is at **new-flow admission, before the host socket is connected or receives payload**. The adapter reports the original IP version, protocol, source/destination address, and ports to Kotlin. Kotlin resolves the UID using the existing `ConnectionOwnerResolver`, caches the decision by flow key, and invokes `RuleEngine`. Non-initial fragments remain governed by the fragment decision cache. An unavailable or ambiguous UID must follow an explicit fail-closed policy rather than silently becoming allowed.
 
-This placement avoids opening a real connection for a blocked flow. Rules are evaluated once when a flow is admitted and the immutable result belongs to that flow; a later ruleset change applies to new flows unless product requirements explicitly require terminating existing flows.
+This placement prevents a blocked flow from opening a real connection. A decision belongs to its flow; later rule changes apply to new flows unless a future requirement explicitly terminates existing flows.
 
 #### TCP strategy
 
-Netstack terminates the app-side TCP connection and supplies the TCP state machine. For an allowed flow, the adapter creates a host TCP socket for the original destination, protects it, connects it, then performs bounded, back-pressured bidirectional copying between the netstack endpoint and host socket. Netstack, rather than Kotlin code, handles sequence numbers, ACKs, retransmission, windows, and IPv4 fragmentation/reassembly behavior. A blocked TCP SYN is initially dropped (timeout semantics); an explicit reset can be considered later if it cannot leak policy details or introduce malformed responses.
+The selected existing stack terminates the app-side TCP connection and handles sequence numbers, ACKs, retransmission, congestion, windows, and teardown. After an ALLOW decision, the adapter creates a host TCP socket for the original destination, protects it, connects it, and performs bounded, back-pressured bidirectional relay. A blocked TCP flow creates no outbound socket.
 
 #### UDP strategy
 
-Netstack supplies UDP endpoints and IP handling. Allowed datagrams are relayed through protected host UDP sockets, keyed by flow, with bounded queues and idle expiry. Responses are returned only to the matching netstack endpoint. Blocked datagrams are discarded and create no host socket. Queue, flow-count, and datagram-size limits are mandatory to bound memory; DNS receives no special remote handling.
+The selected existing stack supplies UDP endpoints and IP handling. Allowed datagrams use protected host UDP sockets keyed by flow, bounded queues, and idle expiry; responses return only to the matching stack endpoint. Blocked datagrams are discarded without creating a host socket. Flow-count, queue, and datagram-size limits are mandatory. DNS receives no remote or special bypass path.
 
 #### Loop prevention
 
-Every Internet-facing socket must be created through one native dial/socket factory. Immediately after socket creation—and **before** `connect()`, `sendto()`, or exposure to a worker—the native adapter calls a synchronous Kotlin callback that invokes `VpnService.protect(fd)`. A false return or callback/JNI error closes the descriptor and fails the flow closed. The adapter must not offer an unprotected socket constructor. TUN and local control descriptors are not Internet-facing sockets.
+Every Internet-facing socket must come from one adapter socket factory. Immediately after socket creation—and **before** `connect()`, `sendto()`, or exposure to a worker—the adapter synchronously calls Kotlin, which invokes `VpnService.protect(fd)`. A false return, thrown error, JNI error, or lost callback closes the descriptor and fails the flow closed. The adapter must expose no unprotected outbound-socket path.
 
-Protecting sockets is loop prevention, not firewall bypass: only an ALLOW decision may reach the protected-socket factory. `Builder.allowBypass()` and `addDisallowedApplication()` are not used.
+Protection prevents routing loops; it is not policy bypass. Only an ALLOW decision may reach the socket factory. `Builder.allowBypass()` and `addDisallowedApplication()` are not used.
 
-### Alternatives considered
+### Alternatives and comparison
 
-| Approach | Android / protocols / IP | Maintenance, license, and integration | Size, battery, performance, and security | Decision |
+| Approach | Android, protocols, and IP | Maintenance, licensing, and integration | Size, battery, performance, and security | Status |
 |---|---|---|---|---|
-| **Embedded gVisor netstack; Outline SDK integration patterns** | Android requires Go mobile/JNI packaging. Mature TCP and UDP; IPv4 and IPv6 exist upstream. Direct dial and a socket-protection callback can be placed after admission. UID remains an Android-side pre-forwarding lookup. | [gVisor](https://github.com/google/gvisor) and [Outline SDK](https://github.com/Jigsaw-Code/outline-sdk) are actively developed Google/Jigsaw projects. Both are Apache-2.0. Pin revisions and retain notices. Native ABI artifacts and JNI are required. | Larger than a small C relay because a Go runtime and netstack are packaged (measure per ABI during spike). One userspace stack plus relays costs CPU/battery, but event-driven bounded I/O avoids per-packet JNI and is likely preferable to a Kotlin packet loop. gVisor publishes [security advisories](https://github.com/google/gvisor/security/advisories); embedding netstack does not provide the full gVisor sandbox, so upstream fixes still require prompt updates. | **Selected.** Best combination of compatible licensing, maintained TCP/IP behavior, both transports, IPv6 path, and a clean pre-dial policy/protection hook without inventing TCP. |
-| **NetGuard native engine** | Proven Android `VpnService`, TCP/UDP, IPv4/IPv6, UID-aware policy, and protected sockets; requires C/JNI. | [NetGuard](https://github.com/M66B/NetGuard) is an important architectural reference. Its repository is GPL-3.0, which is not compatible with distributing copied/linked code under this project's intended permissive boundary without relicensing the combined work. | Mature and optimized for this exact class of application; compact native code, but audit/update burden and native memory-safety risk remain. Its issue tracker/history are useful references, not evidence that code may be copied. | Reference only; do not copy or link GPL code. |
-| **hev-socks5-tunnel / lwIP-based tun2socks** | Supports Android, TCP/UDP and IPv4/IPv6 with a mature lwIP TCP/IP stack; C/JNI and a SOCKS5 proxy endpoint are normally required. FD protection can be integrated in the socket hook. | [hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel) is actively maintained and MIT licensed; lwIP is BSD-style. Its standard architecture forwards to SOCKS5. Running a second local SOCKS component solely to reach direct destinations adds another lifecycle and policy boundary. | Typically smaller than Go and designed for high-performance event-driven I/O. Native C/lwIP expands memory-safety and patch-monitoring responsibilities; two local forwarding layers add copies/wakeups and battery cost. | Viable fallback subject to a new ADR, but unnecessary local SOCKS layering makes firewall admission and failure behavior less direct. |
-| **Java/Kotlin NIO plus a custom TCP implementation** | UDP is straightforward, but TCP requires a complete stateful stack; IPv6 doubles protocol scope. UID lookup and `protect()` would be easy at Java socket creation. | No third-party licensing/JNI, but the application would own a security-sensitive TCP/IP implementation indefinitely. | Potentially small binary, but high correctness, performance, battery, and security risk. | Rejected: explicitly out of scope and unsafe. Raw TUN TCP is not socket data. |
-| **Root/kernel NAT, remote VPN, or per-app VPN bypass** | Root is unavailable; a remote server violates the local-only requirement. Disallowed apps bypass policy rather than being blocked. | Not applicable. | Either changes the trust/privacy model or allows traffic outside enforcement. | Rejected. |
+| **A: direct gVisor `pkg/tcpip`** | Go/JNI packaging; mature TCP/UDP and IPv4/IPv6 upstream. A custom thin adapter must provide direct dialing, UID admission, and the protection callback. | [gVisor](https://github.com/google/gvisor) is actively maintained and Apache-2.0. Pin the exact revision and notices. No Outline implementation is packaged by assumption. | Go runtime/netstack may produce a larger ABI payload than C; measure it. Event-driven relay should avoid per-packet JNI. Track [gVisor advisories](https://github.com/google/gvisor/security/advisories); embedding netstack does not supply the full gVisor sandbox. | Provisional candidate. |
+| **B: Outline `network/lwip2transport` / PacketRelay** | Current Outline TUN integration uses lwIP and `go-tun2socks`; it targets TCP/UDP transport, but Android API 29+, direct original-destination behavior, IPv4/IPv6, protection hooks, and ABI packaging require proof. | Current [Outline SDK](https://github.com/OutlineFoundation/outline-sdk) is actively maintained. Its license plus transitive lwIP/go-tun2socks licenses and notices must be verified and pinned; C/Go/JNI/native artifacts are expected. | lwIP is compact and established, while the wrapper/runtime and ABI delta must be measured. Native C adds memory-safety and patch-monitoring obligations. Relay copies, wakeups, throughput, and idle cost require device benchmarks. | Provisional candidate, distinct from gVisor. |
+| **NetGuard native engine** | Proven Android VPN, TCP/UDP, IPv4/IPv6, UID-aware policy, protected sockets; requires C/JNI. | [NetGuard](https://github.com/M66B/NetGuard) is GPL-3.0 and is an architectural reference only. Copying/linking it would impose incompatible distribution obligations for the intended project licensing. | Mature and optimized for this problem, but carries native audit and update obligations. | Reference only; do not copy or link. |
+| **hev-socks5-tunnel / lwIP tun2socks** | Android, TCP/UDP, and IPv4/IPv6; C/JNI. Its normal topology requires SOCKS5, while this firewall requires direct destinations. | [hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel) is maintained under MIT and uses BSD-style lwIP. | Potentially compact and event driven, but an extra local SOCKS layer adds lifecycle, copies, wakeups, and another policy boundary. | Rejected for this design because SOCKS is unnecessary and must not become a requirement. |
+| **Java/Kotlin NIO plus custom TCP** | UDP is feasible; TCP and future IPv6 would create a new stack. | No dependency license/JNI, but the project would own security-critical protocol code. | High correctness, performance, battery, and security risk. | Rejected and out of scope. |
+| **Root/kernel NAT, remote VPN, backend, or per-app bypass** | Root is unavailable; remote infrastructure violates local-only requirements; disallowed apps bypass enforcement. | Not applicable. | Changes the privacy model or permits traffic outside policy. | Rejected. |
 
-No candidate's binary size or battery cost is stated as a guaranteed number: build flags, ABIs, traffic mix, radio state, and device dominate. The implementation spike must record AAB/APK size deltas and benchmark idle, sustained TCP, bursty UDP, throughput, CPU, wakeups, and memory against an established baseline.
+Binary size and battery statements are qualitative until measured. The spike must record per-ABI APK/AAB deltas, memory, idle CPU/wakeups, sustained TCP throughput, and bursty UDP behavior on representative devices.
 
 ### Licensing implications
 
-The planned adapter and pinned dependencies must remain Apache-2.0 compatible. Release artifacts must include upstream copyright, license, and NOTICE material; Gradle/Go lock metadata must identify exact revisions and an automated dependency/license inventory should be added with the native integration. GPL/AGPL code, including NetGuard implementation code, must not be copied, translated, linked, or used to derive code structure. Reading public projects to understand architecture and Android edge cases is permitted. MIT/BSD alternatives remain legally plausible but are not dependencies selected by this ADR.
+No dependency is approved by this provisional ADR. The spike must inventory and pin the selected stack, adapters, and transitive native/Go dependencies; confirm compatibility with the project's distribution; and preserve every required copyright, license, and NOTICE file. gVisor is Apache-2.0, while the exact current Outline/lwIP/go-tun2socks dependency graph must be verified at the pinned revision. GPL/AGPL implementation code, including NetGuard code, must not be copied, translated, linked, or used to derive source structure.
 
 ### Failure behavior
 
-The forwarding implementation fails closed:
+The forwarder fails closed:
 
-- `start()` succeeds only after JNI loads, the stack owns a valid TUN duplicate, callbacks are installed, and workers are ready. Partial initialization closes every native endpoint, socket, descriptor duplicate, and worker before propagating failure.
-- No default route is installed before successful readiness. When route installation is eventually added, any forwarder death tears the VPN down rather than leaving captured traffic on an unserviced interface or bypassing policy.
-- Parse errors, unsupported protocols, unknown fragments, UID-resolution failure under a UID-dependent policy, resource-limit exhaustion, failed `protect()`, and native dial failures never fall back to an unprotected or direct allow path.
-- Per-flow errors close only that flow where isolation is safe; corruption, callback loss, TUN failure, or worker failure is fatal to the forwarder and VPN session.
+- `start()` succeeds only after native linkage, stack/TUN ownership, callbacks, and workers are ready. Any exception, linkage error, or other failure cleans every partially initialized endpoint, socket, descriptor duplicate, JNI reference, and worker before propagating.
+- No default route is installed before readiness. Once routes exist in a future change, forwarder death tears down the VPN instead of bypassing policy or leaving an unserviced capture route.
+- Parse errors, unsupported protocols, fragments without decisions, UID-resolution failures, exhausted limits, failed `protect()`, and dial failures never fall back to an unprotected/direct allow path.
+- Per-flow errors close that flow when safe; stack corruption, callback loss, TUN failure, or worker failure is fatal to the forwarder and VPN session.
 
 ### Shutdown behavior
 
-`stop()` is idempotent. It first refuses new flows, cancels/joins workers, closes host sockets and netstack endpoints, clears decisions and UID/fragment flow caches, closes native TUN duplicates/JNI references, and only then returns. Shutdown is bounded; a forced native close must unblock reads. The service closes its `ParcelFileDescriptor` after the forwarder stops. A stop error is contained while ownership is cleared so a later start receives a fresh instance. Android service destruction and start-failure cleanup use this same path.
+`stop()` is idempotent and bounded. It refuses new flows, cancels and joins workers, closes host sockets and stack endpoints, clears flow decisions and UID/fragment caches, releases native TUN duplicates and JNI references, and returns. Forced native close must unblock reads. The service closes its `ParcelFileDescriptor` only after the forwarder stops. Failed-start cleanup and Android service destruction use the same path; a cleanup error must not prevent a fresh later instance.
 
-### Acceptance gates before adding a default route
+### Spike and acceptance gates before adding a default route
 
-1. Pinned source/dependency license review and reproducible Android builds for all supported ABIs.
-2. Instrumented IPv4 TCP and UDP forwarding to direct destinations with no proxy/server.
-3. Verified `protect(fd)` ordering and fail-closed behavior for every outbound socket.
-4. BLOCK tests proving no outbound socket is opened; ALLOW tests proving return traffic.
-5. UID attribution tests for TCP/UDP and defined unknown-UID behavior.
-6. Startup failure, native crash/death notification, repeated lifecycle, interface revocation, and bounded shutdown tests.
-7. IPv6 design retained, but no `::/0` route until equivalent IPv6 forwarding tests pass.
-8. Size, memory, throughput, and battery measurements documented.
+The spike must prove, not infer, all of the following for each viable candidate:
+
+1. Reproducible Android API 29+ build and packaging for every supported ABI.
+2. TCP forwarding directly to the original destination without a remote proxy, VPN, backend, or SOCKS server.
+3. UDP forwarding directly to the original destination under the same local-only constraint.
+4. Every outbound TCP and UDP socket is protected before `connect()`/`sendto()`/send, with tests observing call order.
+5. A false or failed `protect()` closes the socket and fails the flow closed.
+6. BLOCK opens no outbound socket; ALLOW returns traffic through the TUN path.
+7. UID attribution and explicit unknown-UID behavior work for TCP and UDP.
+8. Startup/linkage failure cleanup, forwarder death, interface revocation, repeated lifecycle calls, and clean bounded shutdown are tested.
+9. Exact revisions and compatible licenses/notices are pinned and supported ABI artifacts are reproducible.
+10. IPv4 works first; no IPv6 default route is added until equivalent IPv6 forwarding and protection tests pass.
+11. APK/AAB size, memory, throughput, CPU, wakeups, and battery observations are documented.

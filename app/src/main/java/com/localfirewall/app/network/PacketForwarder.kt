@@ -27,7 +27,7 @@ internal class PacketForwarderLifecycle(
         try {
             candidate.start()
             forwarder = candidate
-        } catch (failure: Exception) {
+        } catch (failure: Throwable) {
             runCatching { candidate.stop() }
             throw failure
         }
