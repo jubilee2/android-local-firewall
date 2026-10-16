@@ -24,11 +24,16 @@ internal class PacketForwarderLifecycle(
         if (forwarder != null) return
 
         val candidate = create()
+        forwarder = candidate
         try {
             candidate.start()
-            forwarder = candidate
         } catch (failure: Throwable) {
-            runCatching { candidate.stop() }
+            try {
+                stop()
+            } catch (cleanupFailure: Throwable) {
+                // Keep ownership until a later stop confirms the candidate is quiescent.
+                if (cleanupFailure !== failure) failure.addSuppressed(cleanupFailure)
+            }
             throw failure
         }
     }

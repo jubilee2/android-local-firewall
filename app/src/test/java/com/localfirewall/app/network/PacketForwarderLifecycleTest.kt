@@ -105,6 +105,49 @@ class PacketForwarderLifecycleTest {
         assertEquals(1, replacement.startCount)
     }
 
+    @Test
+    fun `failed startup retains ownership until failed cleanup can be retried`() {
+        val startupFailure = UnsatisfiedLinkError("not ready")
+        val cleanupFailure = IllegalStateException("still running")
+        val failed = RecordingForwarder(
+            startFailure = startupFailure,
+            stopFailures = ArrayDeque(listOf(cleanupFailure)),
+        )
+        val replacement = RecordingForwarder()
+        var createCount = 0
+        val lifecycle = PacketForwarderLifecycle {
+            createCount += 1
+            if (createCount == 1) failed else replacement
+        }
+
+        val thrown = assertThrows(UnsatisfiedLinkError::class.java) { lifecycle.start() }
+        assertEquals(startupFailure, thrown)
+        assertEquals(listOf(cleanupFailure), thrown.suppressed.toList())
+        lifecycle.start()
+        assertEquals(1, createCount)
+        assertEquals(0, replacement.startCount)
+
+        lifecycle.stop()
+        lifecycle.start()
+        assertEquals(2, failed.stopCount)
+        assertEquals(2, createCount)
+        assertEquals(1, replacement.startCount)
+    }
+
+    @Test
+    fun `same startup and cleanup throwable does not mask startup failure`() {
+        val failure = IllegalStateException("shared failure")
+        val failed = RecordingForwarder(
+            startFailure = failure,
+            stopFailures = ArrayDeque(listOf(failure)),
+        )
+        val lifecycle = PacketForwarderLifecycle { failed }
+
+        assertEquals(failure, assertThrows(IllegalStateException::class.java) { lifecycle.start() })
+        lifecycle.stop()
+        assertEquals(2, failed.stopCount)
+    }
+
     private class RecordingForwarder(
         private val startFailure: Throwable? = null,
         private val stopFailures: ArrayDeque<Throwable> = ArrayDeque(),
