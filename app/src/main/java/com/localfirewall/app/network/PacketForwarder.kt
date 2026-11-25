@@ -13,30 +13,73 @@ internal interface PacketForwarder {
     fun stop()
 }
 
-/** Serializes a forwarder's lifecycle and cleans up a partially started implementation. */
+/**
+ * Serializes a forwarder's lifecycle and cleans up a partially started implementation.
+ *
+ * If cleanup ([PacketForwarder.stop]) fails—whether after an active session or during rollback of
+ * a failed [PacketForwarder.start]—ownership of that instance is retained in a cleanup-pending
+ * state. Subsequent [start] attempts fail without creating a replacement until [stop] succeeds.
+ */
 internal class PacketForwarderLifecycle(
     private val create: () -> PacketForwarder,
 ) {
-    private var forwarder: PacketForwarder? = null
+    private var state: State = State.Idle
 
     @Synchronized
     fun start() {
-        if (forwarder != null) return
+        when (val current = state) {
+            is State.Active -> return
+            is State.CleanupPending -> throw IllegalStateException(
+                "Previous forwarder failed cleanup; stop() must succeed before starting a new instance",
+                current.lastCleanupFailure,
+            )
+            State.Idle -> Unit
+        }
 
         val candidate = create()
         try {
             candidate.start()
-            forwarder = candidate
+            state = State.Active(candidate)
         } catch (failure: Throwable) {
-            runCatching { candidate.stop() }
+            try {
+                stopForwarder(candidate)
+            } catch (cleanupFailure: Throwable) {
+                if (cleanupFailure !== failure) {
+                    failure.addSuppressed(cleanupFailure)
+                }
+            }
             throw failure
         }
     }
 
     @Synchronized
     fun stop() {
-        val active = forwarder ?: return
-        active.stop()
-        forwarder = null
+        val target = when (val current = state) {
+            State.Idle -> return
+            is State.Active -> current.forwarder
+            is State.CleanupPending -> current.forwarder
+        }
+        stopForwarder(target)
+    }
+
+    private fun stopForwarder(target: PacketForwarder) {
+        try {
+            target.stop()
+            state = State.Idle
+        } catch (cleanupFailure: Throwable) {
+            state = State.CleanupPending(target, cleanupFailure)
+            throw cleanupFailure
+        }
+    }
+
+    private sealed interface State {
+        data object Idle : State
+
+        data class Active(val forwarder: PacketForwarder) : State
+
+        data class CleanupPending(
+            val forwarder: PacketForwarder,
+            val lastCleanupFailure: Throwable,
+        ) : State
     }
 }
