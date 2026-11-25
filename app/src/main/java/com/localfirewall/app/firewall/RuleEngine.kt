@@ -7,11 +7,17 @@ import com.localfirewall.app.network.TransportProtocol
 class RuleEngine(
     private val rules: List<FirewallRule>,
     private val defaultAction: FirewallAction = FirewallAction.ALLOW,
+    private val failClosedOnUnknownUid: Boolean = false,
 ) {
-    fun evaluate(packet: PacketMetadata): FirewallAction =
-        rules.firstOrNull { it.matches(packet) }?.action ?: defaultAction
+    fun evaluate(packet: PacketMetadata): FirewallAction {
+        if (failClosedOnUnknownUid && packet.uid == null) {
+            return FirewallAction.BLOCK
+        }
+        return rules.firstOrNull { it.matches(packet) }?.action ?: defaultAction
+    }
 
     private fun FirewallRule.matches(packet: PacketMetadata): Boolean {
+        if (uid != null && uid != packet.uid) return false
         if (destinationAddress != null && destinationAddress != packet.destinationAddress) return false
         if (destinationCidr != null && !destinationCidr.contains(packet.destinationAddress)) return false
         if (protocol != TransportProtocol.ANY && protocol != packet.protocol) return false
