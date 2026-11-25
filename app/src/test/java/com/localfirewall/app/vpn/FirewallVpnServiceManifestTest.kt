@@ -27,6 +27,7 @@ class FirewallVpnServiceManifestTest {
             }
         assertTrue("android.permission.FOREGROUND_SERVICE" in permissions)
         assertTrue("android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" in permissions)
+        assertTrue("android.permission.QUERY_ALL_PACKAGES" in permissions)
 
         val service = document.getElementsByTagName("service")
             .let { nodes -> (0 until nodes.length).map(nodes::item) }

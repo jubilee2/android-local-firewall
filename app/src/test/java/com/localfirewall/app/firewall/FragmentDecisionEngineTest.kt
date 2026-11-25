@@ -101,6 +101,30 @@ class FragmentDecisionEngineTest {
         assertEquals(FirewallAction.ALLOW, engine.evaluate(laterFragment(TransportProtocol.TCP)))
     }
 
+    @Test
+    fun `per-UID first fragment decision carries over to non-initial fragments`() {
+        val ruleEngine = RuleEngine(
+            rules = listOf(FirewallRule(action = FirewallAction.ALLOW, uid = 10500)),
+            defaultAction = FirewallAction.BLOCK,
+            failClosedOnUnknownUid = true,
+        )
+        val engine = FragmentDecisionEngine(ruleEngine = ruleEngine)
+
+        assertEquals(
+            FirewallAction.ALLOW,
+            engine.evaluate(firstFragment(TransportProtocol.UDP, 53, identification = 42).copy(uid = 10500)),
+        )
+        assertEquals(
+            FirewallAction.ALLOW,
+            engine.evaluate(laterFragment(TransportProtocol.UDP, identification = 42)),
+        )
+        // Uncached orphan fragment without UID fails closed.
+        assertEquals(
+            FirewallAction.BLOCK,
+            engine.evaluate(laterFragment(TransportProtocol.UDP, identification = 99)),
+        )
+    }
+
     private fun engine(
         action: FirewallAction,
         protocol: TransportProtocol,

@@ -9,6 +9,7 @@ data class FirewallRule(
     val destinationCidr: IPv4Cidr? = null,
     val protocol: TransportProtocol = TransportProtocol.ANY,
     val destinationPort: Int? = null,
+    val uid: Int? = null,
 ) {
     init {
         require(destinationAddress == null || destinationCidr == null) {
@@ -16,6 +17,9 @@ data class FirewallRule(
         }
         require(destinationPort == null || destinationPort in 0..65535) {
             "Destination port must be between 0 and 65535"
+        }
+        require(uid == null || uid >= 0) {
+            "UID must be non-negative"
         }
     }
 }
