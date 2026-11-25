@@ -20,6 +20,7 @@ class RuleEngine(
         if (uid != null && uid != packet.uid) return false
         if (destinationAddress != null && destinationAddress != packet.destinationAddress) return false
         if (destinationCidr != null && !destinationCidr.contains(packet.destinationAddress)) return false
+        if (destinationIpv6Cidr != null && !destinationIpv6Cidr.contains(packet.destinationAddress)) return false
         if (protocol != TransportProtocol.ANY && protocol != packet.protocol) return false
         if (destinationPort != null && destinationPort != packet.destinationPort) return false
         return true

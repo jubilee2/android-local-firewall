@@ -84,7 +84,7 @@ fun RulesTabContent(
                         destinationInput = it
                         if (inputError != null) onClearError()
                     },
-                    label = { Text("IPv4 or CIDR (optional, e.g. 8.8.8.8 or 192.168.0.0/16)") },
+                    label = { Text("IPv4/IPv6 or CIDR (optional, e.g. 8.8.8.8 or 2001:db8::/32)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -156,8 +156,9 @@ private fun NetworkRuleRow(
     onToggleEnabled: (Boolean) -> Unit,
     onDelete: () -> Unit,
 ) {
-    val destinationSummary = rule.destinationAddress?.hostAddress
+    val destinationSummary = rule.destinationAddress?.let(com.localfirewall.app.firewall.IpAddressLiteral::format)
         ?: rule.destinationCidr?.format()
+        ?: rule.destinationIpv6Cidr?.format()
         ?: "Any destination"
     val portSummary = rule.destinationPort?.let { "port $it" } ?: "any port"
 
