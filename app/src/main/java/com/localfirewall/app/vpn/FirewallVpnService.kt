@@ -26,6 +26,7 @@ class FirewallVpnService : VpnService() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var packetProcessor: PacketProcessor? = null
     private var decisionCoordinator: PacketDecisionCoordinator? = null
+    private var networkMonitor: AndroidUnderlyingNetworkMonitor? = null
 
     companion object {
         const val ACTION_START = "com.localfirewall.app.vpn.action.START"
@@ -47,6 +48,7 @@ class FirewallVpnService : VpnService() {
                 startForeground(NOTIFICATION_ID, createNotification())
                 val tunInterface = establishVpnInterface()
                 if (tunInterface != null) {
+                    startNetworkMonitor()
                     startPacketProcessor(tunInterface)
                     FirewallServiceState.setStarted(true)
                     true
@@ -59,9 +61,15 @@ class FirewallVpnService : VpnService() {
         ).handle(intent?.action)
     }
 
+    override fun onRevoke() {
+        stopService()
+        super.onRevoke()
+    }
+
     private fun stopService() {
         stopPacketProcessor()
         stopDecisionCoordinator()
+        stopNetworkMonitor()
         // ParcelFileDescriptor owns the TUN descriptor and is released after polling is canceled.
         vpnInterface.close()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -73,6 +81,7 @@ class FirewallVpnService : VpnService() {
     override fun onDestroy() {
         stopPacketProcessor()
         stopDecisionCoordinator()
+        stopNetworkMonitor()
         // This is idempotent and releases the descriptor after packet polling is canceled.
         vpnInterface.close()
         FirewallServiceState.setStarted(false)
@@ -93,6 +102,20 @@ class FirewallVpnService : VpnService() {
     } catch (_: SecurityException) {
         vpnInterface.close()
         null
+    }
+
+    private fun startNetworkMonitor() {
+        if (networkMonitor != null) return
+        val connectivityManager = getSystemService(ConnectivityManager::class.java) ?: return
+        networkMonitor = AndroidUnderlyingNetworkMonitor(
+            connectivityManager = connectivityManager,
+            applyUnderlyingNetworks = ::setUnderlyingNetworks,
+        ).also(AndroidUnderlyingNetworkMonitor::start)
+    }
+
+    private fun stopNetworkMonitor() {
+        networkMonitor?.close()
+        networkMonitor = null
     }
 
     private fun startPacketProcessor(tunInterface: ParcelFileDescriptor) {
