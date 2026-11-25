@@ -49,13 +49,13 @@ Initial implementation may use a single Android app module.
 
 Package structure:
 
-com.localfirewall
+`com.localfirewall.app`
 
-ui/
-vpn/
-firewall/
-network/
-data/
+- `ui/` (implemented Compose start/stop shell; app rules, network rules, and traffic log screens planned)
+- `vpn/` (implemented `FirewallVpnService`, permission flow, `/32` TUN lifecycle, and `PacketProcessor`)
+- `firewall/` (implemented IPv4/CIDR/protocol/port `RuleEngine`, `FragmentDecisionEngine`, and `ConnectionOwnerResolver`; per-app rule matching planned)
+- `network/` (implemented IPv4/TCP/UDP parsers, `PacketMetadata`, `FlowKey`, and `PacketForwarderLifecycle` scaffold; actual userspace packet forwarding not yet implemented)
+- `data/` (planned `FirewallRepository` and Room persistence)
 
 
 ## Components
@@ -65,7 +65,7 @@ data/
 Responsible for:
 
 - creating VPN
-- creating TUN interface
+- creating TUN interface (currently a minimal `/32` interface with no default capture routes until forwarding passes ADR-001 gates)
 - starting packet processing
 - stopping VPN
 
@@ -76,18 +76,24 @@ It should NOT contain firewall rule logic.
 Responsible for:
 
 - reading packets from TUN
-- parsing IP packets
-- extracting protocol information
-- sending packet metadata to RuleEngine
+- parsing IP packets (currently IPv4 + TCP/UDP headers; IPv6 planned)
+- resolving owning Android UID via `ConnectionOwnerResolver`
+- sending packet metadata to `FragmentDecisionEngine` / `RuleEngine`
+
+Note: `PacketProcessor` currently evaluates metadata in-memory without forwarding allowed packets or enforcing blocked flows on device traffic.
+
+### Network forwarding (`PacketForwarder`)
+
+Planned userspace forwarding boundary (ADR-001 selects Outline SDK `network/lwip2transport` contingent on acceptance gates; PR #30 is recorded as a failed integration spike, so no native stack or default route is wired yet).
 
 ### RuleEngine
 
-Input:
+Target input:
 
-- application
-- destination IP
-- protocol
-- destination port
+- application (planned; UID resolution exists in `PacketMetadata`, `FirewallRule` currently matches network fields only)
+- destination IP / CIDR (IPv4 implemented; IPv6 planned)
+- protocol (TCP/UDP implemented)
+- destination port (implemented)
 
 Output:
 
@@ -95,11 +101,11 @@ ALLOW or BLOCK
 
 RuleEngine must be independently unit testable.
 
-### FirewallRepository
+### FirewallRepository (planned)
 
 Responsible for loading and storing firewall rules.
 
-### Room database
+### Room database (planned)
 
 Stores:
 
