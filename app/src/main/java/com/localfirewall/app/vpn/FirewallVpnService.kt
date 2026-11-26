@@ -238,7 +238,10 @@ internal class FirewallServiceCommandHandler(
     private val stop: () -> Unit,
 ) {
     fun handle(action: String?): Int = when (action) {
-        FirewallVpnService.ACTION_START -> {
+        FirewallVpnService.ACTION_START,
+        VpnService.SERVICE_INTERFACE,
+        null,
+        -> {
             if (start()) Service.START_REDELIVER_INTENT else Service.START_NOT_STICKY
         }
         FirewallVpnService.ACTION_STOP -> {

@@ -1,6 +1,7 @@
 package com.localfirewall.app.vpn
 
 import android.app.Service
+import android.net.VpnService
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -43,6 +44,38 @@ class FirewallServiceCommandHandlerTest {
     }
 
     @Test
+    fun `system always-on VpnService interface action starts firewall session`() {
+        var started = false
+        var stopped = false
+        val result = FirewallServiceCommandHandler(
+            start = {
+                started = true
+                true
+            },
+            stop = { stopped = true },
+        ).handle(VpnService.SERVICE_INTERFACE)
+
+        assertTrue(started)
+        assertFalse(stopped)
+        assertEquals(Service.START_REDELIVER_INTENT, result)
+    }
+
+    @Test
+    fun `null restart intent action starts firewall session`() {
+        var started = false
+        val result = FirewallServiceCommandHandler(
+            start = {
+                started = true
+                true
+            },
+            stop = {},
+        ).handle(null)
+
+        assertTrue(started)
+        assertEquals(Service.START_REDELIVER_INTENT, result)
+    }
+
+    @Test
     fun `stop command invokes shutdown without starting foreground execution`() {
         var started = false
         var stopped = false
@@ -66,6 +99,23 @@ class FirewallServiceCommandHandlerTest {
             stop = {},
         ).handle(FirewallVpnService.ACTION_START)
 
+        assertEquals(Service.START_NOT_STICKY, result)
+    }
+
+    @Test
+    fun `unknown explicit action neither starts nor stops service`() {
+        var started = false
+        var stopped = false
+        val result = FirewallServiceCommandHandler(
+            start = {
+                started = true
+                true
+            },
+            stop = { stopped = true },
+        ).handle("com.localfirewall.app.vpn.action.UNKNOWN")
+
+        assertFalse(started)
+        assertFalse(stopped)
         assertEquals(Service.START_NOT_STICKY, result)
     }
 }
