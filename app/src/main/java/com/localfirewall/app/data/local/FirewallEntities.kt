@@ -9,6 +9,8 @@ import com.localfirewall.app.data.TrafficLogEntry
 import com.localfirewall.app.firewall.AppFirewallRule
 import com.localfirewall.app.firewall.FirewallAction
 import com.localfirewall.app.firewall.IPv4Cidr
+import com.localfirewall.app.firewall.IPv6Cidr
+import com.localfirewall.app.firewall.IpAddressLiteral
 import com.localfirewall.app.network.TransportProtocol
 
 @Entity(
@@ -52,24 +54,29 @@ data class NetworkRuleEntity(
     val priority: Int,
     val createdAtMillis: Long,
 ) {
-    fun toDomain(): StoredNetworkRule = StoredNetworkRule(
-        id = id,
-        action = FirewallAction.valueOf(action),
-        destinationAddress = destinationAddress?.let(IPv4Cidr::parseAddress),
-        destinationCidr = destinationCidr?.let(IPv4Cidr::parse),
-        protocol = TransportProtocol.valueOf(protocol),
-        destinationPort = destinationPort,
-        enabled = enabled,
-        priority = priority,
-        createdAtMillis = createdAtMillis,
-    )
+    fun toDomain(): StoredNetworkRule {
+        val ipv4Cidr = destinationCidr?.takeIf { ':' !in it }?.let(IPv4Cidr::parse)
+        val ipv6Cidr = destinationCidr?.takeIf { ':' in it }?.let(IPv6Cidr::parse)
+        return StoredNetworkRule(
+            id = id,
+            action = FirewallAction.valueOf(action),
+            destinationAddress = destinationAddress?.let(IpAddressLiteral::parse),
+            destinationCidr = ipv4Cidr,
+            destinationIpv6Cidr = ipv6Cidr,
+            protocol = TransportProtocol.valueOf(protocol),
+            destinationPort = destinationPort,
+            enabled = enabled,
+            priority = priority,
+            createdAtMillis = createdAtMillis,
+        )
+    }
 }
 
 fun StoredNetworkRule.toEntity(): NetworkRuleEntity = NetworkRuleEntity(
     id = id,
     action = action.name,
-    destinationAddress = destinationAddress?.hostAddress,
-    destinationCidr = destinationCidr?.format(),
+    destinationAddress = destinationAddress?.let(IpAddressLiteral::format),
+    destinationCidr = destinationCidr?.format() ?: destinationIpv6Cidr?.format(),
     protocol = protocol.name,
     destinationPort = destinationPort,
     enabled = enabled,

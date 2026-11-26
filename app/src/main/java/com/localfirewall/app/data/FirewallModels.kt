@@ -3,15 +3,17 @@ package com.localfirewall.app.data
 import com.localfirewall.app.firewall.FirewallAction
 import com.localfirewall.app.firewall.FirewallRule
 import com.localfirewall.app.firewall.IPv4Cidr
+import com.localfirewall.app.firewall.IPv6Cidr
 import com.localfirewall.app.network.TransportProtocol
-import java.net.Inet4Address
+import java.net.InetAddress
 
 /** Persisted network-level firewall rule with ordering and enablement metadata. */
 data class StoredNetworkRule(
     val id: Long = 0,
     val action: FirewallAction,
-    val destinationAddress: Inet4Address? = null,
+    val destinationAddress: InetAddress? = null,
     val destinationCidr: IPv4Cidr? = null,
+    val destinationIpv6Cidr: IPv6Cidr? = null,
     val protocol: TransportProtocol = TransportProtocol.ANY,
     val destinationPort: Int? = null,
     val enabled: Boolean = true,
@@ -19,8 +21,13 @@ data class StoredNetworkRule(
     val createdAtMillis: Long = 0L,
 ) {
     init {
-        require(destinationAddress == null || destinationCidr == null) {
-            "Specify either an exact destination or a CIDR, not both"
+        val destinationSpecifiers = listOfNotNull(
+            destinationAddress,
+            destinationCidr,
+            destinationIpv6Cidr,
+        ).size
+        require(destinationSpecifiers <= 1) {
+            "Specify at most one exact destination or CIDR"
         }
         require(destinationPort == null || destinationPort in 0..65535) {
             "Destination port must be between 0 and 65535"
@@ -28,6 +35,7 @@ data class StoredNetworkRule(
         require(
             destinationAddress != null ||
                 destinationCidr != null ||
+                destinationIpv6Cidr != null ||
                 protocol != TransportProtocol.ANY ||
                 destinationPort != null,
         ) {
@@ -39,6 +47,7 @@ data class StoredNetworkRule(
         action = action,
         destinationAddress = destinationAddress,
         destinationCidr = destinationCidr,
+        destinationIpv6Cidr = destinationIpv6Cidr,
         protocol = protocol,
         destinationPort = destinationPort,
     )

@@ -142,5 +142,8 @@ private fun TrafficLogRow(entry: TrafficLogEntry) {
     }
 }
 
-private fun formatEndpoint(address: String, port: Int?): String =
-    if (port == null) address else "$address:$port"
+private fun formatEndpoint(address: String, port: Int?): String = when {
+    port == null -> address
+    ':' in address -> "[$address]:$port"
+    else -> "$address:$port"
+}

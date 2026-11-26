@@ -6,6 +6,7 @@ import android.system.OsConstants
 import android.system.StructPollfd
 import com.localfirewall.app.firewall.ConnectionOwnerResolver
 import com.localfirewall.app.network.IPv4PacketParser
+import com.localfirewall.app.network.IPv6PacketParser
 import com.localfirewall.app.network.PacketMetadata
 import com.localfirewall.app.network.TcpPacketParser
 import com.localfirewall.app.network.TransportProtocol
@@ -144,12 +145,17 @@ internal class PacketProcessor(
 
 /** Parses header metadata only; packet bytes and parsed results are deliberately not retained. */
 private fun parsePacketMetadata(packet: ByteArray): PacketMetadata? {
-    val ipv4 = IPv4PacketParser.parse(packet) ?: return null
-    val protocol = when (ipv4.protocol) {
-        6 -> TransportProtocol.TCP
-        17 -> TransportProtocol.UDP
-        else -> TransportProtocol.ANY
+    if (packet.isEmpty()) return null
+    return when ((packet[0].toInt() and 0xff) ushr 4) {
+        4 -> parseIPv4Metadata(packet)
+        6 -> parseIPv6Metadata(packet)
+        else -> null
     }
+}
+
+private fun parseIPv4Metadata(packet: ByteArray): PacketMetadata? {
+    val ipv4 = IPv4PacketParser.parse(packet) ?: return null
+    val protocol = toTransportProtocol(ipv4.protocol)
     val transport = when (protocol) {
         TransportProtocol.TCP -> TcpPacketParser.parse(packet, ipv4)
         TransportProtocol.UDP -> UdpPacketParser.parse(packet, ipv4)
@@ -165,4 +171,30 @@ private fun parsePacketMetadata(packet: ByteArray): PacketMetadata? {
         fragmentOffset = ipv4.fragmentOffset,
         moreFragments = ipv4.moreFragments,
     )
+}
+
+private fun parseIPv6Metadata(packet: ByteArray): PacketMetadata? {
+    val ipv6 = IPv6PacketParser.parse(packet) ?: return null
+    val protocol = toTransportProtocol(ipv6.protocol)
+    val transport = when (protocol) {
+        TransportProtocol.TCP -> TcpPacketParser.parse(packet, ipv6)
+        TransportProtocol.UDP -> UdpPacketParser.parse(packet, ipv6)
+        TransportProtocol.ANY -> null
+    }
+    return PacketMetadata(
+        sourceAddress = ipv6.sourceAddress,
+        destinationAddress = ipv6.destinationAddress,
+        protocol = protocol,
+        sourcePort = transport?.sourcePort,
+        destinationPort = transport?.destinationPort,
+        identification = ipv6.identification,
+        fragmentOffset = ipv6.fragmentOffset,
+        moreFragments = ipv6.moreFragments,
+    )
+}
+
+private fun toTransportProtocol(protocolNumber: Int): TransportProtocol = when (protocolNumber) {
+    6 -> TransportProtocol.TCP
+    17 -> TransportProtocol.UDP
+    else -> TransportProtocol.ANY
 }
