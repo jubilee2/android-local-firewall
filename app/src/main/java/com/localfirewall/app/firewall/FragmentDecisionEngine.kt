@@ -13,7 +13,7 @@ import java.net.InetAddress
  * still match, while rules requiring an unavailable port cannot match.
  */
 class FragmentDecisionEngine(
-    private val ruleEngine: RuleEngine,
+    private var ruleEngine: RuleEngine,
     private val maxEntries: Int = DEFAULT_MAX_ENTRIES,
     private val entryLifetimeMillis: Long = DEFAULT_ENTRY_LIFETIME_MILLIS,
     private val elapsedRealtimeMillis: () -> Long = { System.nanoTime() / NANOS_PER_MILLISECOND },
@@ -56,6 +56,12 @@ class FragmentDecisionEngine(
             decisions[identity] = CachedDecision(action, now + entryLifetimeMillis)
         }
         return action
+    }
+
+    @Synchronized
+    fun updateRuleEngine(updated: RuleEngine) {
+        ruleEngine = updated
+        decisions.clear()
     }
 
     @Synchronized

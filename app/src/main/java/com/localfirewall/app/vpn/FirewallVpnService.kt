@@ -15,17 +15,17 @@ import android.os.ParcelFileDescriptor
 import android.system.OsConstants
 import androidx.core.app.ServiceCompat
 import com.localfirewall.app.R
+import com.localfirewall.app.data.FirewallRepository
+import com.localfirewall.app.data.local.FirewallDatabase
 import com.localfirewall.app.firewall.AndroidConnectionOwnerLookup
 import com.localfirewall.app.firewall.ConnectionOwnerResolver
-import com.localfirewall.app.firewall.FragmentDecisionEngine
-import com.localfirewall.app.firewall.RuleEngine
 import java.io.Closeable
 
 class FirewallVpnService : VpnService() {
     private val vpnInterface = VpnInterfaceLifecycle<ParcelFileDescriptor>()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var packetProcessor: PacketProcessor? = null
-    private val fragmentDecisionEngine = FragmentDecisionEngine(RuleEngine(emptyList()))
+    private var decisionCoordinator: PacketDecisionCoordinator? = null
 
     companion object {
         const val ACTION_START = "com.localfirewall.app.vpn.action.START"
@@ -61,7 +61,7 @@ class FirewallVpnService : VpnService() {
 
     private fun stopService() {
         stopPacketProcessor()
-        fragmentDecisionEngine.close()
+        stopDecisionCoordinator()
         // ParcelFileDescriptor owns the TUN descriptor and is released after polling is canceled.
         vpnInterface.close()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -72,7 +72,7 @@ class FirewallVpnService : VpnService() {
 
     override fun onDestroy() {
         stopPacketProcessor()
-        fragmentDecisionEngine.close()
+        stopDecisionCoordinator()
         // This is idempotent and releases the descriptor after packet polling is canceled.
         vpnInterface.close()
         FirewallServiceState.setStarted(false)
@@ -97,12 +97,17 @@ class FirewallVpnService : VpnService() {
 
     private fun startPacketProcessor(tunInterface: ParcelFileDescriptor) {
         if (packetProcessor != null) return
+        val coordinator = PacketDecisionCoordinator(
+            repository = FirewallRepository.getInstance(FirewallDatabase.getInstance(applicationContext)),
+            uidApplicationLookup = PackageManagerUidApplicationLookup(packageManager),
+        ).also(PacketDecisionCoordinator::start)
+        decisionCoordinator = coordinator
         packetProcessor = PacketProcessor(
             source = PollingTunPacketSource(tunInterface.fileDescriptor),
             connectionOwnerResolver = ConnectionOwnerResolver(
                 AndroidConnectionOwnerLookup(getSystemService(ConnectivityManager::class.java)),
             ),
-            metadataHandler = fragmentDecisionEngine::evaluate,
+            metadataHandler = coordinator::evaluateAndRecord,
             onUnexpectedTermination = { terminatedProcessor ->
                 mainHandler.post {
                     if (packetProcessor === terminatedProcessor) stopService()
@@ -114,6 +119,11 @@ class FirewallVpnService : VpnService() {
     private fun stopPacketProcessor() {
         packetProcessor?.close()
         packetProcessor = null
+    }
+
+    private fun stopDecisionCoordinator() {
+        decisionCoordinator?.close()
+        decisionCoordinator = null
     }
 
     private fun createNotification(): Notification =
