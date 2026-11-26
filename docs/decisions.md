@@ -2,8 +2,10 @@
 
 ## ADR-001: Use Outline SDK’s lwIP transport bridge
 
-**Status:** accepted for prototyping; dependency adoption still requires an Android integration spike
+**Status:** accepted for prototyping; dependency adoption is blocked pending a verified Android integration spike
 **Research reviewed:** 2026-08-28
+
+> **Integration gate status (PR #30): failed.** PR #30 did not verify an immutable upstream `OutlineFoundation/outline-sdk` commit or compile/link/execute `network/lwip2transport` (its native stub was removed, leaving a documentation-only diff). No default VPN capture route or forwarding wiring may be enabled until a replacement spike builds a verified pinned upstream revision for supported Android ABIs and passes all acceptance gates below.
 
 ### Context and constraints
 
