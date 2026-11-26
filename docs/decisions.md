@@ -2,16 +2,16 @@
 
 ## ADR-001: Use Outline SDK’s lwIP transport bridge
 
-**Status:** verified upstream Android build implemented (`OutlineFoundation/outline-sdk@ff3fcd3bf7571967a6e2fa324e93f242505f514a`); default VPN routes remain deferred to service wiring
+**Status:** implemented and wired for IPv4 (`0.0.0.0/0`) in `FirewallVpnService` (`OutlineFoundation/outline-sdk@ff3fcd3bf7571967a6e2fa324e93f242505f514a`); IPv6 `::/0` route remains gated per Gate #10
 **Research reviewed:** 2026-11-25
 
-> **Integration gate status:** Replaces failed PR #30 with a reproducible source build against pinned immutable upstream commit `ff3fcd3bf7571967a6e2fa324e93f242505f514a` (`golang.getoutline.org/sdk v0.1.1-0.20261110205933-ff3fcd3bf757` + `github.com/eycorsican/go-tun2socks v1.16.11` + `golang.org/x/sys v0.35.0`, ~3.1 MB stripped 16 KB-aligned `.so` per ABI for `arm64-v8a` and `x86_64`). Default IPv4/IPv6 routes are still intentionally omitted in this change until `FirewallVpnService` wiring is reviewed separately.
+> **Integration gate status:** Replaces failed PR #30 with a reproducible source build against pinned immutable upstream commit `ff3fcd3bf7571967a6e2fa324e93f242505f514a` (`golang.getoutline.org/sdk v0.1.1-0.20261110205933-ff3fcd3bf757` + `github.com/eycorsican/go-tun2socks v1.16.11` + `golang.org/x/sys v0.35.0`, ~3.1 MB stripped 16 KB-aligned `.so` per ABI for `arm64-v8a` and `x86_64`), wired into `FirewallVpnService` via `FirewallVpnSessionOrchestrator` and `PacketForwarderLifecycle` with the IPv4 default route (`0.0.0.0/0`) and without `allowFamily(AF_INET6)` bypass.
 
 ### Context and constraints
 
 A TUN file descriptor supplies IP packets, not socket byte streams. In particular, a TCP packet cannot be written to a Java `Socket`: TCP connection state, sequencing, acknowledgements, retransmission, congestion/flow control, and teardown require a network stack. The firewall must remain entirely on-device, handle TCP and UDP, and must not depend on a remote VPN, backend, proxy, or SOCKS server. We will not create a TCP/IP stack.
 
-No default IPv4 or IPv6 route is added by this decision. Capturing all traffic is deferred until a working ALLOW path is protected against VPN recursion and tested end-to-end.
+IPv4 default capture (`0.0.0.0/0`) is enabled only after verifying the protected ALLOW path and fail-closed BLOCK/unknown-UID path end-to-end on Linux race tests and Android Emulator JNI tests; IPv6 default capture (`::/0`) remains deferred until dual-stack UDP PCB support is verified.
 
 ### Decision
 

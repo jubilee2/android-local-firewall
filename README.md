@@ -16,51 +16,48 @@ and apply local firewall rules.
 
 ## Current status
 
-Early pre-release foundation (`0.1.0`, in development). **This application does not yet capture general device traffic or enforce allow/block packet forwarding.**
+Pre-release (`0.1.0`, active development). **IPv4 device traffic is captured (`0.0.0.0/0`) and enforced locally on-device** using the verified Outline SDK `network/lwip2transport` Go/JNI userspace stack (`OutlineFoundation/outline-sdk@ff3fcd3bf7571967a6e2fa324e93f242505f514a`).
 
-`FirewallVpnService` currently establishes a minimal `/32` TUN interface without default IPv4/IPv6 routes while userspace packet forwarding remains gated on ADR-001 acceptance checks (PR #30 is recorded as a failed Outline SDK `lwip2transport` integration spike and must be replaced by a verified upstream build before any default capture route is enabled).
+Per ADR-001 Gate #10, `FirewallVpnService` currently installs the IPv4 default capture route (`0.0.0.0/0`) and intentionally omits `allowFamily(AF_INET6)` and IPv6 `::/0` routes so apps use enforced IPv4 rather than bypassing firewall policy over IPv6 while upstream `go-tun2socks@v1.16.11` binds its singleton UDP PCB to IPv4 only.
 
-### Implemented foundations
+### Implemented features
 
-- Android Kotlin + Jetpack Compose shell with VPN permission flow, start/stop controls, and service status indicator
-- Foreground `FirewallVpnService` lifecycle with minimal `/32` TUN interface management (no default route)
-- Non-blocking `PacketProcessor` reading TUN packets and extracting IPv4, TCP, and UDP header metadata
-- `ConnectionOwnerResolver` flow-level Android UID attribution with bounded LRU/TTL caching
-- Pure, unit-tested `RuleEngine` and `FragmentDecisionEngine` for IPv4 address, IPv4 CIDR, protocol (TCP/UDP), and destination port rules
-- `PacketForwarder` / `PacketForwarderLifecycle` boundary and ADR-001 forwarding design (not yet wired to a verified native stack or `FirewallVpnService`)
-- GitHub Actions CI running JVM unit tests, Android Lint, and debug APK builds
+- Jetpack Compose UI with four tabs (`Status`, `Apps`, `Rules`, `Logs`), VPN permission flow, and start/stop controls
+- Foreground `FirewallVpnService` with `0.0.0.0/0` IPv4 capture route, `onRevoke()` handling, and `AndroidUnderlyingNetworkMonitor` (`setUnderlyingNetworks`)
+- Reproducible Android NDK/Go JNI build (`native/outline-forwarder`, `arm64-v8a` & `x86_64`) against pinned `OutlineFoundation/outline-sdk` `network/lwip2transport` with BuildInfo pin verification
+- Direct original-destination TCP and UDP forwarding with synchronous pre-stack 5-tuple admission, fail-closed Android UID resolution (`ConnectionOwnerResolver`), and pre-I/O `VpnService.protect(fd)` enforcement
+- Per-application (`uid`) allow/block rules (`InstalledAppsProvider`, `AppFirewallRule`) and IPv4/IPv6 address, CIDR, TCP/UDP, and destination-port rules (`RuleEngine`, `FragmentDecisionEngine`)
+- Room local persistence (`FirewallDatabase`, `FirewallRepository`) for app rules, network rules, settings, and bounded metadata-only traffic logs (zero packet payload storage)
+- GitHub Actions CI running Go race tests, JVM unit tests, Android Lint, debug/instrumentation APK builds, native `.so` module verification, and KVM Android API 30 Emulator JNI + Room instrumentation tests
 
-### Planned / not yet implemented
+### Remaining roadmap items
 
-- Enforced local TCP/UDP packet forwarding and blocking via a verified Outline SDK `lwip2transport` build and default VPN routes (PR #30 failed this gate)
-- Per-application firewall rules (`uid` matching, installed-application listing, and app rule UI)
-- Local rule and settings persistence with Room (`data/` layer and `FirewallRepository` not yet created)
-- Local traffic log storage and Compose UI screen
-- IPv6 packet parsing, rule matching, and forwarding (currently only `allowFamily(AF_INET6)` is set on the minimal TUN builder)
-- Always-on VPN (`SUPPORTS_ALWAYS_ON` is currently `false`) and block-connections-without-VPN validation
-- Android instrumentation, emulator, and physical-device end-to-end validation
+- Always-on VPN (`SUPPORTS_ALWAYS_ON` and system-initiated `android.net.VpnService` start handling) and release workflow automation
+- End-to-end IPv6 `::/0` capture route once dual-stack UDP PCB support replaces `go-tun2socks@v1.16.11`'s IPv4-bound singleton UDP PCB
+- Physical-device battery, throughput, and block-connections-without-VPN validation
 
 ## Target features
 
-- Start / stop firewall (service lifecycle implemented; traffic capture/enforcement pending forwarding gate)
-- Per-app allow/block (planned; UID lookup foundation only)
-- IP allow/block (IPv4 rule evaluation foundation implemented; enforcement and Room UI pending)
-- CIDR allow/block (IPv4 CIDR evaluation foundation implemented; enforcement and Room UI pending)
-- TCP/UDP filtering (header parsing and rule evaluation foundation implemented; enforcement pending)
-- Port filtering (destination port evaluation foundation implemented; enforcement pending)
-- Local traffic log (planned)
-- IPv4 support (header parsing and rule engine foundation implemented; forwarding pending)
-- IPv6 support (planned)
-- Always-on VPN support (planned)
-- Block connections when VPN is unavailable (planned)
+- Start / stop firewall (implemented)
+- Per-app allow/block (implemented)
+- IP allow/block (implemented for IPv4 & IPv6 literals; IPv4 enforced on TUN route)
+- CIDR allow/block (implemented for IPv4 & IPv6 CIDRs; IPv4 enforced on TUN route)
+- TCP/UDP filtering (implemented)
+- Port filtering (implemented)
+- Local traffic log (implemented, metadata-only in Room)
+- IPv4 support (implemented and enforced end-to-end)
+- IPv6 support (parser, CIDR/rule engine, and UI implemented; `::/0` TUN route gated on upstream IPv6 UDP stack support)
+- Always-on VPN support (next stage)
+- Block connections when VPN is unavailable (validated alongside Always-on VPN)
 
 ## Technology
 
 - Kotlin
 - Jetpack Compose
 - Android VpnService
-- Room (planned for local persistence)
-- Gradle
+- Outline SDK `network/lwip2transport` (Go/CGo JNI)
+- Room
+- Gradle Kotlin DSL
 - GitHub Actions
 
 ## Important constraints

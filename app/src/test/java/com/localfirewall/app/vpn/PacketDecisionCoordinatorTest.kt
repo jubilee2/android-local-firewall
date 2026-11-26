@@ -86,6 +86,61 @@ class PacketDecisionCoordinatorTest {
         }
     }
 
+    @Test
+    fun `failClosedOnUnknownUid blocks unknown UID and orphan fragments across rule updates`() = runTest {
+        val testDispatcher = StandardTestDispatcher(testScheduler)
+        val repository = FirewallRepository(
+            store = InMemoryFirewallLocalStore(),
+            currentTimeMillis = { 20_000L },
+        )
+        val coordinator = PacketDecisionCoordinator(
+            repository = repository,
+            failClosedOnUnknownUid = true,
+            dispatcher = testDispatcher,
+            currentTimeMillis = { 35_000L },
+        )
+
+        try {
+            coordinator.start()
+            advanceUntilIdle()
+
+            // Initial packet without resolved UID fails closed.
+            assertEquals(
+                FirewallAction.BLOCK,
+                coordinator.evaluateAndRecord(packet(destination = "1.1.1.1", uid = null, moreFragments = false)),
+            )
+
+            // Orphan non-initial fragment without cached initial fragment also fails closed.
+            val orphanFragment = packet(destination = "1.1.1.1", uid = null, moreFragments = false).copy(
+                sourcePort = null,
+                destinationPort = null,
+                identification = 777,
+                fragmentOffset = 2,
+            )
+            assertEquals(FirewallAction.BLOCK, coordinator.evaluateAndRecord(orphanFragment))
+
+            // Updating rules preserves failClosedOnUnknownUid = true on the replacement RuleEngine.
+            repository.addOrUpdateNetworkRule(
+                StoredNetworkRule(
+                    action = FirewallAction.ALLOW,
+                    destinationPort = 443,
+                ),
+            )
+            advanceUntilIdle()
+
+            assertEquals(
+                FirewallAction.BLOCK,
+                coordinator.evaluateAndRecord(packet(destination = "1.1.1.1", uid = null, moreFragments = false)),
+            )
+            assertEquals(
+                FirewallAction.ALLOW,
+                coordinator.evaluateAndRecord(packet(destination = "1.1.1.1", uid = 10420, moreFragments = false)),
+            )
+        } finally {
+            coordinator.close()
+        }
+    }
+
     private fun packet(
         destination: String,
         uid: Int?,

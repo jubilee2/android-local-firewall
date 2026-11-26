@@ -80,7 +80,10 @@ class PackageManagerUidApplicationLookup(
  */
 internal class PacketDecisionCoordinator(
     private val repository: FirewallRepository,
-    private val fragmentDecisionEngine: FragmentDecisionEngine = FragmentDecisionEngine(RuleEngine(emptyList())),
+    private val failClosedOnUnknownUid: Boolean = false,
+    private val fragmentDecisionEngine: FragmentDecisionEngine = FragmentDecisionEngine(
+        RuleEngine(emptyList(), failClosedOnUnknownUid = failClosedOnUnknownUid),
+    ),
     private val uidApplicationLookup: UidApplicationLookup = UidApplicationLookup { null },
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val currentTimeMillis: () -> Long = System::currentTimeMillis,
@@ -104,7 +107,9 @@ internal class PacketDecisionCoordinator(
         started = true
         scope.launch {
             repository.activeFirewallRules.collect { activeRules ->
-                fragmentDecisionEngine.updateRuleEngine(RuleEngine(activeRules))
+                fragmentDecisionEngine.updateRuleEngine(
+                    RuleEngine(activeRules, failClosedOnUnknownUid = failClosedOnUnknownUid),
+                )
             }
         }
         scope.launch {
