@@ -34,6 +34,24 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Set up Go 1.25
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.25.x"
+          cache-dependency-path: native/outline-forwarder/go.sum
+
+      - name: Ensure Android NDK 27.2.12479018
+        run: |
+          if [ ! -d "${ANDROID_HOME}/ndk/27.2.12479018" ]; then
+            yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.2.12479018" >/dev/null
+          fi
+
+      - name: Verify Go module checksums and run lwip2transport race tests
+        working-directory: native/outline-forwarder
+        run: |
+          go mod verify
+          go test -v -race ./...
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
 
@@ -49,9 +67,83 @@ jobs:
       - name: Build debug Android instrumentation test APK
         run: ./gradlew --no-daemon --stacktrace assembleDebugAndroidTest
 
+      - name: Verify packaged native ABIs and compiled Outline module metadata
+        run: |
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          PINNED_COMMIT="$(tr -d '[:space:]' < native/outline-forwarder/OUTLINE_SDK_COMMIT)"
+          SHORT_COMMIT="${PINNED_COMMIT:0:12}"
+          unzip -l "${APK_PATH}" | tee native-size-report.txt
+          grep -q "lib/arm64-v8a/liboutline_forwarder.so" native-size-report.txt
+          grep -q "lib/x86_64/liboutline_forwarder.so" native-size-report.txt
+          mkdir -p /tmp/extracted-jni
+          unzip -o "${APK_PATH}" "lib/*/liboutline_forwarder.so" -d /tmp/extracted-jni
+          for so in /tmp/extracted-jni/lib/*/liboutline_forwarder.so; do
+            echo "=== ${so} ===" >> native-size-report.txt
+            go version -m "${so}" | tee -a native-size-report.txt
+            go version -m "${so}" | grep -q "golang.getoutline.org/sdk.*-${SHORT_COMMIT}"
+            go version -m "${so}" | grep -q "github.com/eycorsican/go-tun2socks"
+          done
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v7
         with:
           name: debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      - name: Upload debug Android instrumentation test APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: debug-androidTest-apk
+          path: app/build/outputs/apk/androidTest/debug/*.apk
+          if-no-files-found: error
+
+      - name: Upload native size and dependency report
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-size-report
+          path: native-size-report.txt
+          if-no-files-found: error
+
+  android-jni-test:
+    name: Android Emulator JNI & Instrumentation Tests
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Download debug APK
+        uses: actions/download-artifact@v7
+        with:
+          name: debug-apk
+          path: artifacts/debug
+
+      - name: Download debug AndroidTest APK
+        uses: actions/download-artifact@v7
+        with:
+          name: debug-androidTest-apk
+          path: artifacts/androidTest
+
+      - name: Enable KVM for Android Emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Execute instrumentation and JNI forwarding tests on Android API 30 (x86_64)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: default
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -nosnapshot -no-audio -no-boot-anim
+          script: |
+            adb wait-for-device
+            adb install -r artifacts/debug/*.apk
+            adb install -r artifacts/androidTest/*.apk
+            adb shell am instrument -w \
+              -e class com.localfirewall.app.network.outline.OutlineForwarderInstrumentedTest,com.localfirewall.app.data.FirewallDatabaseInstrumentedTest \
+              com.localfirewall.app.test/androidx.test.runner.AndroidJUnitRunner | tee instrument.log
+            ! grep -q "FAILURES!!!" instrument.log
+            grep -q "OK (" instrument.log
