@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"net/netip"
-	"os"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -19,6 +18,7 @@ import (
 	"golang.getoutline.org/sdk/network/lwip2transport"
 	"golang.getoutline.org/sdk/network/packetrelay"
 	"golang.getoutline.org/sdk/transport"
+	"golang.org/x/sys/unix"
 )
 
 // pinnedOutlineCommit is injected at build time from OUTLINE_SDK_COMMIT via -ldflags.
@@ -158,12 +158,14 @@ type destKey struct {
 	dst   netip.AddrPort
 }
 
-// Forwarder owns one TUN duplicate FD, the singleton lwip2transport stack, and all outbound sockets.
+// Forwarder owns one TUN duplicate FD, a wakeup pipe, the singleton lwip2transport stack, and all outbound sockets.
 type Forwarder struct {
-	cfg       Config
-	callbacks Callbacks
-	tunFile   *os.File
-	ipDevice  network.IPDevice
+	cfg         Config
+	callbacks   Callbacks
+	tunFd       int
+	wakeReadFd  int
+	wakeWriteFd int
+	ipDevice    network.IPDevice
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -176,12 +178,12 @@ type Forwarder struct {
 	tcpSem chan struct{}
 	udpSem chan struct{}
 
-	stateMu        sync.Mutex
-	admittedFlows  map[fiveTuple]time.Time
-	destGrants     map[destKey]time.Time
-	activeTCPConns map[*trackedTCPConn]struct{}
+	stateMu         sync.Mutex
+	admittedFlows   map[fiveTuple]time.Time
+	destGrants      map[destKey]time.Time
+	activeTCPConns  map[*trackedTCPConn]struct{}
 	activeUDPAssocs map[*directUDPAssociation]struct{}
-	onCloseRelease func()
+	onCloseRelease  func()
 }
 
 // StartForwarder duplicates tunFd, configures lwip2transport, and starts bidirectional packet workers.
@@ -199,21 +201,23 @@ func StartForwarder(tunFd int, callbacks Callbacks, cfg Config) (*Forwarder, err
 		return nil, errForwarderAlreadyActive
 	}
 
-	dupFd, err := syscall.Dup(tunFd)
+	dupFd, err := unix.Dup(tunFd)
 	if err != nil {
 		activeForwarderMu.Unlock()
 		return nil, fmt.Errorf("outline forwarder: dup tunFd: %w", err)
 	}
-	if err := syscall.SetNonblock(dupFd, true); err != nil {
-		_ = syscall.Close(dupFd)
+	unix.CloseOnExec(dupFd)
+	if err := unix.SetNonblock(dupFd, true); err != nil {
+		_ = unix.Close(dupFd)
 		activeForwarderMu.Unlock()
 		return nil, fmt.Errorf("outline forwarder: setnonblock tunFd: %w", err)
 	}
-	tunFile := os.NewFile(uintptr(dupFd), "firewall-tun")
-	if tunFile == nil {
-		_ = syscall.Close(dupFd)
+
+	var wakePipe [2]int
+	if err := unix.Pipe2(wakePipe[:], unix.O_CLOEXEC|unix.O_NONBLOCK); err != nil {
+		_ = unix.Close(dupFd)
 		activeForwarderMu.Unlock()
-		return nil, errors.New("outline forwarder: os.NewFile returned nil")
+		return nil, fmt.Errorf("outline forwarder: pipe2 wakeup: %w", err)
 	}
 
 	resolvedCfg := cfg.withDefaults()
@@ -222,7 +226,9 @@ func StartForwarder(tunFd int, callbacks Callbacks, cfg Config) (*Forwarder, err
 	fwd := &Forwarder{
 		cfg:             resolvedCfg,
 		callbacks:       callbacks,
-		tunFile:         tunFile,
+		tunFd:           dupFd,
+		wakeReadFd:      wakePipe[0],
+		wakeWriteFd:     wakePipe[1],
 		ctx:             ctx,
 		cancel:          cancel,
 		tcpSem:          make(chan struct{}, resolvedCfg.MaxTCPStreams),
@@ -239,7 +245,9 @@ func StartForwarder(tunFd int, callbacks Callbacks, cfg Config) (*Forwarder, err
 	)
 	if err != nil {
 		cancel()
-		_ = tunFile.Close()
+		_ = unix.Close(wakePipe[0])
+		_ = unix.Close(wakePipe[1])
+		_ = unix.Close(dupFd)
 		activeForwarderMu.Unlock()
 		return nil, fmt.Errorf("outline forwarder: configure lwip2transport: %w", err)
 	}
@@ -260,8 +268,11 @@ func (f *Forwarder) Stop() error {
 		f.cancel()
 
 		var errs []error
-		if err := f.tunFile.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
-			errs = append(errs, fmt.Errorf("close tun dup: %w", err))
+		// Closing wakeWriteFd immediately unblocks unix.Poll in TUN workers with POLLHUP.
+		if f.wakeWriteFd >= 0 {
+			if err := unix.Close(f.wakeWriteFd); err != nil && !errors.Is(err, unix.EBADF) {
+				errs = append(errs, fmt.Errorf("close wake pipe write end: %w", err))
+			}
 		}
 		if f.ipDevice != nil {
 			if err := f.ipDevice.Close(); err != nil && !errors.Is(err, network.ErrClosed) {
@@ -297,10 +308,21 @@ func (f *Forwarder) Stop() error {
 			close(done)
 		}()
 
+		joined := false
 		select {
 		case <-done:
+			joined = true
 		case <-time.After(f.cfg.ShutdownTimeout):
 			errs = append(errs, errors.New("outline forwarder: worker join timed out"))
+		}
+
+		if joined {
+			if err := unix.Close(f.tunFd); err != nil && !errors.Is(err, unix.EBADF) {
+				errs = append(errs, fmt.Errorf("close tun dup: %w", err))
+			}
+			if err := unix.Close(f.wakeReadFd); err != nil && !errors.Is(err, unix.EBADF) {
+				errs = append(errs, fmt.Errorf("close wake pipe read end: %w", err))
+			}
 		}
 
 		if releaseFn != nil {
@@ -323,56 +345,125 @@ func (f *Forwarder) Stop() error {
 func (f *Forwarder) readTunToStack() {
 	defer f.wg.Done()
 	buf := make([]byte, tunReadBufferBytes)
-	for {
-		n, err := f.tunFile.Read(buf)
+	pollFds := []unix.PollFd{
+		{Fd: int32(f.tunFd), Events: unix.POLLIN},
+		{Fd: int32(f.wakeReadFd), Events: unix.POLLIN},
+	}
+
+	for !f.stopping.Load() {
+		pollFds[0].Revents = 0
+		pollFds[1].Revents = 0
+		_, err := unix.Poll(pollFds, -1)
 		if err != nil {
-			if !f.stopping.Load() && !errors.Is(err, os.ErrClosed) && !errors.Is(err, io.EOF) {
-				f.callbacks.OnFatalError(fmt.Sprintf("tun read failed: %v", err))
+			if errors.Is(err, unix.EINTR) {
+				continue
+			}
+			if !f.stopping.Load() {
+				f.callbacks.OnFatalError(fmt.Sprintf("tun poll failed: %v", err))
 			}
 			return
 		}
-		if n == 0 {
+		if f.stopping.Load() || pollFds[1].Revents != 0 {
+			return
+		}
+		if pollFds[0].Revents&(unix.POLLERR|unix.POLLHUP|unix.POLLNVAL) != 0 && pollFds[0].Revents&unix.POLLIN == 0 {
+			if !f.stopping.Load() {
+				f.callbacks.OnFatalError("tun descriptor closed or errored")
+			}
+			return
+		}
+		if pollFds[0].Revents&unix.POLLIN == 0 {
 			continue
 		}
-		pkt := buf[:n]
-		if !f.admitIngressPacket(pkt) {
-			continue
-		}
-		if _, err := f.ipDevice.Write(pkt); err != nil {
-			if f.stopping.Load() || errors.Is(err, network.ErrClosed) {
+
+		for !f.stopping.Load() {
+			n, readErr := unix.Read(f.tunFd, buf)
+			if readErr != nil {
+				if errors.Is(readErr, unix.EINTR) {
+					continue
+				}
+				if errors.Is(readErr, unix.EAGAIN) || errors.Is(readErr, unix.EWOULDBLOCK) {
+					break
+				}
+				if !f.stopping.Load() {
+					f.callbacks.OnFatalError(fmt.Sprintf("tun read failed: %v", readErr))
+				}
 				return
 			}
-			f.callbacks.OnFatalError(fmt.Sprintf("lwip write failed: %v", err))
-			return
+			if n == 0 {
+				if !f.stopping.Load() {
+					f.callbacks.OnFatalError("tun EOF")
+				}
+				return
+			}
+			pkt := buf[:n]
+			if !f.admitIngressPacket(pkt) {
+				continue
+			}
+			if _, writeErr := f.ipDevice.Write(pkt); writeErr != nil {
+				if f.stopping.Load() || errors.Is(writeErr, network.ErrClosed) {
+					return
+				}
+				f.callbacks.OnFatalError(fmt.Sprintf("lwip write failed: %v", writeErr))
+				return
+			}
 		}
 	}
 }
 
 func (f *Forwarder) readStackToTun() {
 	defer f.wg.Done()
-	mtu := f.ipDevice.MTU()
-	if mtu <= 0 {
-		mtu = tunReadBufferBytes
+	writer := &tunPacketWriter{
+		fwd: f,
+		pollFds: []unix.PollFd{
+			{Fd: int32(f.tunFd), Events: unix.POLLOUT},
+			{Fd: int32(f.wakeReadFd), Events: unix.POLLIN},
+		},
 	}
-	buf := make([]byte, mtu)
-	for {
-		n, err := f.ipDevice.Read(buf)
-		if err != nil {
-			if !f.stopping.Load() && !errors.Is(err, io.EOF) && !errors.Is(err, network.ErrClosed) {
-				f.callbacks.OnFatalError(fmt.Sprintf("lwip read failed: %v", err))
-			}
-			return
+	// Use io.Copy so lwIPDevice.WriteTo is invoked instead of lwIPDevice.Read:
+	// WriteTo selects on <-d.done when sending on d.rdN, avoiding a close race
+	// with forwardOutgoingIPPacket and avoiding intermediate packet copies.
+	_, err := io.Copy(writer, f.ipDevice)
+	if err != nil && !f.stopping.Load() && !errors.Is(err, io.EOF) && !errors.Is(err, network.ErrClosed) && !errors.Is(err, errForwarderClosed) {
+		f.callbacks.OnFatalError(fmt.Sprintf("lwip to tun copy failed: %v", err))
+	}
+}
+
+type tunPacketWriter struct {
+	fwd     *Forwarder
+	pollFds []unix.PollFd
+}
+
+func (w *tunPacketWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	f := w.fwd
+	for !f.stopping.Load() {
+		_, writeErr := unix.Write(f.tunFd, p)
+		if writeErr == nil {
+			return len(p), nil
 		}
-		if n == 0 {
+		if errors.Is(writeErr, unix.EINTR) {
 			continue
 		}
-		if _, err := f.tunFile.Write(buf[:n]); err != nil {
-			if !f.stopping.Load() && !errors.Is(err, os.ErrClosed) {
-				f.callbacks.OnFatalError(fmt.Sprintf("tun write failed: %v", err))
+		if errors.Is(writeErr, unix.EAGAIN) || errors.Is(writeErr, unix.EWOULDBLOCK) {
+			w.pollFds[0].Revents = 0
+			w.pollFds[1].Revents = 0
+			if _, pollErr := unix.Poll(w.pollFds, -1); pollErr != nil {
+				if errors.Is(pollErr, unix.EINTR) {
+					continue
+				}
+				return 0, fmt.Errorf("tun write poll failed: %w", pollErr)
 			}
-			return
+			if f.stopping.Load() || w.pollFds[1].Revents != 0 {
+				return 0, errForwarderClosed
+			}
+			continue
 		}
+		return 0, fmt.Errorf("tun write failed: %w", writeErr)
 	}
+	return 0, errForwarderClosed
 }
 
 func (f *Forwarder) admitIngressPacket(pkt []byte) bool {

@@ -5,7 +5,7 @@
 **Status:** verified upstream Android build implemented (`OutlineFoundation/outline-sdk@ff3fcd3bf7571967a6e2fa324e93f242505f514a`); default VPN routes remain deferred to service wiring
 **Research reviewed:** 2026-11-25
 
-> **Integration gate status:** Replaces failed PR #30 with a reproducible source build against pinned immutable upstream commit `ff3fcd3bf7571967a6e2fa324e93f242505f514a` (`golang.getoutline.org/sdk v0.1.1-0.20261110205933-ff3fcd3bf757` + `github.com/eycorsican/go-tun2socks v1.16.11`, ~3.1 MB stripped 16 KB-aligned `.so` per ABI for `arm64-v8a` and `x86_64`). Default IPv4/IPv6 routes are still intentionally omitted in this change until `FirewallVpnService` wiring is reviewed separately.
+> **Integration gate status:** Replaces failed PR #30 with a reproducible source build against pinned immutable upstream commit `ff3fcd3bf7571967a6e2fa324e93f242505f514a` (`golang.getoutline.org/sdk v0.1.1-0.20261110205933-ff3fcd3bf757` + `github.com/eycorsican/go-tun2socks v1.16.11` + `golang.org/x/sys v0.35.0`, ~3.1 MB stripped 16 KB-aligned `.so` per ABI for `arm64-v8a` and `x86_64`). Default IPv4/IPv6 routes are still intentionally omitted in this change until `FirewallVpnService` wiring is reviewed separately.
 
 ### Context and constraints
 
@@ -17,7 +17,9 @@ No default IPv4 or IPv6 route is added by this decision. Capturing all traffic i
 
 Use the maintained [Outline SDK](https://github.com/OutlineFoundation/outline-sdk) `network/lwip2transport` bridge, which embeds the mature lwIP userspace TCP/IP stack, behind the Kotlin `PacketForwarder` boundary. Write a small project-owned Go/JNI adapter (`native/outline-forwarder`) that supplies direct (not SOCKS) TCP and UDP transports to the packets’ original destinations. The adapter exposes synchronous flow-admission and socket-protection callbacks before any outbound connection or datagram.
 
-Inspection of `OutlineFoundation/outline-sdk@ff3fcd3bf7571967a6e2fa324e93f242505f514a` confirmed that `lwip2transport` passes only remote destinations (`target.String()`) to `transport.StreamDialer` and passes no endpoints to `packetrelay.PacketRelay.NewAssociation()`. Therefore, the Go adapter performs 5-tuple header extraction and synchronous JNI admission **before** writing packets into `lwip2transport` (`IPDevice.Write`) and enforces a matching destination-grant check inside `StreamDialer` and `PacketRelay`.
+Inspection of `OutlineFoundation/outline-sdk@ff3fcd3bf7571967a6e2fa324e93f242505f514a` confirmed two upstream details that shape both adapter placement and route gating:
+- `lwip2transport` passes only remote destinations (`target.String()`) to `transport.StreamDialer` and passes no endpoints to `packetrelay.PacketRelay.NewAssociation()`. Therefore, the Go adapter performs 5-tuple header extraction and synchronous JNI admission **before** writing packets into `lwip2transport` (`IPDevice.Write`) and enforces a matching destination-grant check inside `StreamDialer` and `PacketRelay`.
+- Transitive `github.com/eycorsican/go-tun2socks@v1.16.11` (`core/lwip.go:66` + `core/c/core/udp.c:720`) binds its singleton UDP PCB to `IP_ADDR_ANY` (`IPADDR_TYPE_V4`) rather than `IP_ANY_TYPE`, causing `udp_sendto` to reject IPv6 UDP return datagrams (`!IP_ADDR_PCB_VERSION_MATCH`). Per Gate #10 below, service wiring must therefore enable the IPv4 default route (`0.0.0.0/0`) first without exposing uncaptured IPv6 bypass or adding an IPv6 `::/0` default route until dual-stack UDP PCB support is verified.
 
 ### Required forwarding path
 

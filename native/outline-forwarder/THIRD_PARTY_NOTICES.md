@@ -12,6 +12,7 @@ the single upstream pin `native/outline-forwarder/OUTLINE_SDK_COMMIT`:
 | **Outline SDK (`network/lwip2transport`, `network/packetrelay`, `transport`)** | `golang.getoutline.org/sdk` (`https://github.com/OutlineFoundation/outline-sdk`) | `v0.1.1-0.20261110205933-ff3fcd3bf757` (`ff3fcd3bf7571967a6e2fa324e93f242505f514a`) | `h1:94QVqUhUqnxyOu2tdmU597tNBODQ81abccIAsNTz2x8=` | Apache-2.0 |
 | **go-tun2socks (`core` CGo wrapper)** | `github.com/eycorsican/go-tun2socks` | `v1.16.11` | `h1:+hJDNgisrYaGEqoSxhdikMgMJ4Ilfwm/IZDrWRrbaH8=` | MIT |
 | **lwIP TCP/IP stack (embedded in `go-tun2socks/core/c`)** | Swedish Institute of Computer Science (SICS) lwIP | Bundled in `github.com/eycorsican/go-tun2socks@v1.16.11` | Included in `go-tun2socks` module sum above | BSD-3-Clause |
+| **Go Extended Unix Syscalls (`golang.org/x/sys/unix`)** | `golang.org/x/sys` | `v0.35.0` | `h1:vz1N37gP5bs89s7He8XuIYXpyY0+QlsKmzipCbUtyxI=` | BSD-3-Clause |
 | **Go Standard Library & Runtime** | `go` toolchain | `go1.25.0` | Official Go distribution | BSD-3-Clause |
 
 No GPL, AGPL, or LGPL code (including NetGuard) is linked, copied, or derived.
