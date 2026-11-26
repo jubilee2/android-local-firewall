@@ -303,7 +303,7 @@ func Java_com_localfirewall_app_network_outline_OutlineNativeBridge_nativeStart(
 	}
 
 	cAdmitName := C.CString("admitPacket")
-	cAdmitSig := C.CString("(II[BI[BIIIIZ)Z")
+	cAdmitSig := C.CString("(II[BI[BIIIZ)Z")
 	cProtectName := C.CString("protectSocket")
 	cProtectSig := C.CString("(I)Z")
 	cFatalName := C.CString("onFatalError")
