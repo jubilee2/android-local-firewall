@@ -25,6 +25,7 @@ class FirewallVpnServiceManifestTest {
                     .map { nodes.item(it).attributes.getNamedItemNS(androidNamespace, "name").nodeValue }
                     .toSet()
             }
+        assertTrue("android.permission.INTERNET" in permissions)
         assertTrue("android.permission.ACCESS_NETWORK_STATE" in permissions)
         assertTrue("android.permission.FOREGROUND_SERVICE" in permissions)
         assertTrue("android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" in permissions)
