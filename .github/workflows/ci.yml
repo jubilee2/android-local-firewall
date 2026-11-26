@@ -46,6 +46,9 @@ jobs:
       - name: Build debug APK
         run: ./gradlew --no-daemon --stacktrace assembleDebug
 
+      - name: Build debug Android instrumentation test APK
+        run: ./gradlew --no-daemon --stacktrace assembleDebugAndroidTest
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v7
         with:
