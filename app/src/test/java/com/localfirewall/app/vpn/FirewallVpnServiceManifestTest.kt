@@ -54,7 +54,7 @@ class FirewallVpnServiceManifestTest {
                     "android.net.VpnService.SUPPORTS_ALWAYS_ON"
             }
         assertEquals(
-            "false",
+            "true",
             alwaysOnMetadata.attributes.getNamedItemNS(androidNamespace, "value").nodeValue,
         )
     }

@@ -28,13 +28,13 @@ Per ADR-001 Gate #10, `FirewallVpnService` currently installs the IPv4 default c
 - Direct original-destination TCP and UDP forwarding with synchronous pre-stack 5-tuple admission, fail-closed Android UID resolution (`ConnectionOwnerResolver`), and pre-I/O `VpnService.protect(fd)` enforcement
 - Per-application (`uid`) allow/block rules (`InstalledAppsProvider`, `AppFirewallRule`) and IPv4/IPv6 address, CIDR, TCP/UDP, and destination-port rules (`RuleEngine`, `FragmentDecisionEngine`)
 - Room local persistence (`FirewallDatabase`, `FirewallRepository`) for app rules, network rules, settings, and bounded metadata-only traffic logs (zero packet payload storage)
-- GitHub Actions CI running Go race tests, JVM unit tests, Android Lint, debug/instrumentation APK builds, native `.so` module verification, and KVM Android API 30 Emulator JNI + Room instrumentation tests
+- GitHub Actions CI & Release workflows running Go race tests, JVM unit tests, Android Lint, debug/release/instrumentation APK builds, SHA-256 checksummed release bundles, native `.so` module verification, and KVM Android API 30 Emulator JNI + Room instrumentation tests
+- Always-on VPN (`SUPPORTS_ALWAYS_ON = true` and system-initiated `android.net.VpnService` start handling, compatible with Android's "Block connections without VPN" lockdown setting)
 
 ### Remaining roadmap items
 
-- Always-on VPN (`SUPPORTS_ALWAYS_ON` and system-initiated `android.net.VpnService` start handling) and release workflow automation
 - End-to-end IPv6 `::/0` capture route once dual-stack UDP PCB support replaces `go-tun2socks@v1.16.11`'s IPv4-bound singleton UDP PCB
-- Physical-device battery, throughput, and block-connections-without-VPN validation
+- Physical-device battery, throughput, and Always-on lockdown hardware testing
 
 ## Target features
 
@@ -47,8 +47,8 @@ Per ADR-001 Gate #10, `FirewallVpnService` currently installs the IPv4 default c
 - Local traffic log (implemented, metadata-only in Room)
 - IPv4 support (implemented and enforced end-to-end)
 - IPv6 support (parser, CIDR/rule engine, and UI implemented; `::/0` TUN route gated on upstream IPv6 UDP stack support)
-- Always-on VPN support (next stage)
-- Block connections when VPN is unavailable (validated alongside Always-on VPN)
+- Always-on VPN support (implemented; `SUPPORTS_ALWAYS_ON = true`)
+- Block connections when VPN is unavailable (supported via Android system Always-on VPN lockdown)
 
 ## Technology
 

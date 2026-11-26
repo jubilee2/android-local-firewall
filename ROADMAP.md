@@ -73,12 +73,13 @@
 - [x] IPv6 packet parsing, CIDR/address rules, and UI validation (`::/0` TUN capture route gated on upstream dual-stack UDP PCB support)
 - [x] VPN revocation and restart handling (`onRevoke()`, `FirewallVpnSessionOrchestrator`)
 - [x] Network change handling (`UnderlyingNetworkTracker` and `AndroidUnderlyingNetworkMonitor`)
-- [ ] Always-on VPN support (`SUPPORTS_ALWAYS_ON` and system `android.net.VpnService` start handling)
+- [x] Always-on VPN support (`SUPPORTS_ALWAYS_ON = true` and system `android.net.VpnService` start handling)
+- [x] Reproducible GitHub Actions release/deployment bundle workflow (`.github/workflows/release.yml`)
 - [ ] Physical-device battery and throughput profiling
 
 ## Phase 9 - Testing
 
-- [x] Unit tests for VPN session orchestration, packet parsers, UID resolver, rule engine, Room repository, and Compose state holder
+- [x] Unit tests for VPN session orchestration, Always-on command handling, packet parsers, UID resolver, rule engine, Room repository, and Compose state holder
 - [x] Go `-race` integration tests for `lwip2transport` TCP/UDP forwarding, socket protection order, and fail-closed admission
 - [x] Android instrumentation tests (Room database, Compose UI, and JNI `OutlineForwarderInstrumentedTest`)
 - [x] Automated GitHub Actions Android API 30 Emulator (`x86_64` KVM) JNI & Room test job
