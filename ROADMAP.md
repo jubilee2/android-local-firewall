@@ -1,6 +1,6 @@
 # Roadmap
 
-> **Note on enforcement status:** Phases 1–4 below reflect implemented on-device foundations and JVM unit tests. Actual device-wide traffic capture and enforced allow/block packet forwarding remain **unimplemented** until the ADR-001 userspace packet-forwarding gate passes (see Forwarding Gate below).
+> **Enforcement status:** Phases 1–7 and the ADR-001 IPv4 forwarding gate are implemented and enforced locally on-device via `FirewallVpnService` (`0.0.0.0/0` route + verified Outline SDK `network/lwip2transport` JNI bridge). IPv6 `::/0` capture remains gated on upstream `go-tun2socks` dual-stack UDP PCB support (while `AF_INET6` bypass is blocked on the VPN interface).
 
 ## Phase 1 - Project bootstrap
 
@@ -16,70 +16,70 @@
 - [x] Request VPN permission
 - [x] Start VPN
 - [x] Stop VPN
-- [x] Create TUN interface (minimal `/32` interface only; no default capture route installed yet)
-- [x] Show firewall status (service start/stop state; does not yet enforce traffic filtering)
+- [x] Create TUN interface and install enforced IPv4 `0.0.0.0/0` capture route
+- [x] Show firewall status
 
 ## Phase 3 - Packet processing
 
-- [x] Read IPv4 packets (`PollingTunPacketSource` and `PacketProcessor`)
-- [x] Parse IPv4 header (`IPv4PacketParser`)
+- [x] Read IPv4 and IPv6 packets (`IPv4PacketParser`, `IPv6PacketParser`, `PacketProcessor`, and Go pre-stack header inspector)
+- [x] Parse IPv4 and IPv6 headers (including RFC 8200 extension and Fragment headers)
 - [x] Parse TCP (`TcpPacketParser`)
 - [x] Parse UDP (`UdpPacketParser`)
-- [x] Unit tests for packet parser
+- [x] Unit tests for packet parsers
 
-## Phase 4 - Firewall engine (pure evaluation foundation)
+## Phase 4 - Firewall engine
 
 - [x] Define firewall rule model (`FirewallRule`, `FirewallAction`)
-- [x] Implement allow/block decision evaluation (`RuleEngine`, `FragmentDecisionEngine`; active `FirewallVpnService` currently evaluates against an empty rule list without dropping or forwarding packets)
-- [x] IP rules (IPv4 destination matching)
-- [x] CIDR rules (`IPv4Cidr` matching)
+- [x] Implement allow/block decision evaluation (`RuleEngine`, `FragmentDecisionEngine`, `PacketDecisionCoordinator` with `failClosedOnUnknownUid = true`)
+- [x] IP rules (IPv4 and IPv6 destination matching)
+- [x] CIDR rules (`IPv4Cidr` and `IPv6Cidr` matching)
 - [x] Port rules (destination port matching)
 - [x] TCP/UDP rules (`TransportProtocol` matching)
 - [x] RuleEngine unit tests
 
-## Forwarding & enforcement gate (blocking real traffic capture)
+## Forwarding & enforcement gate
 
 - [x] Define `PacketForwarder` / `PacketForwarderLifecycle` boundary and ADR-001 architecture
-- [x] Add `ConnectionOwnerResolver` flow UID attribution foundation for TCP/UDP
-- [ ] Replace failed Outline SDK `lwip2transport` spike (PR #30 failed gate: unverified commit and constant-string C stub without `lwip2transport`) with a verified pinned upstream Android build
-- [ ] Prove direct original-destination TCP/UDP forwarding, pre-I/O `VpnService.protect()`, fail-closed UID/protection handling, and bounded shutdown
-- [ ] Wire `PacketForwarder` to `FirewallVpnService` and install capture routes only after all ADR-001 gates pass
+- [x] Add `ConnectionOwnerResolver` flow UID attribution for TCP/UDP
+- [x] Replace failed PR #30 spike with verified pinned upstream Android build (`OutlineFoundation/outline-sdk@ff3fcd3bf7571967a6e2fa324e93f242505f514a`)
+- [x] Prove direct original-destination TCP/UDP forwarding, pre-I/O `VpnService.protect()`, fail-closed UID/protection handling, and bounded shutdown on Linux race tests and Android API 30 Emulator JNI tests
+- [x] Wire `OutlinePacketForwarder` to `FirewallVpnService` and install IPv4 `0.0.0.0/0` capture route without `AF_INET6` bypass
 
 ## Phase 5 - App filtering
 
-- [ ] List installed applications
-- [ ] Create per-app rules (extend `FirewallRule` / `RuleEngine` beyond UID attribution foundation)
-- [ ] Store app rules
-- [ ] Apply app rules to enforced flows
+- [x] List installed applications (`InstalledAppsProvider`)
+- [x] Create per-app rules (`AppFirewallRule`, UID matching in `RuleEngine`)
+- [x] Store app rules in Room
+- [x] Apply app rules to enforced flows (blocked apps take precedence before network rules)
 
 ## Phase 6 - Persistence
 
-- [ ] Add Room (`data/` package and `FirewallRepository`)
-- [ ] Store firewall rules
-- [ ] Store settings
-- [ ] Store traffic metadata
+- [x] Add Room (`FirewallDatabase`, `FirewallLocalStore`, `FirewallRepository`)
+- [x] Store firewall rules
+- [x] Store settings
+- [x] Store bounded metadata-only traffic logs (no packet payloads)
 
 ## Phase 7 - Traffic log
 
-- [ ] Traffic log screen
-- [ ] Allow/block status
-- [ ] Application name
-- [ ] Destination
-- [ ] Protocol
-- [ ] Port
+- [x] Traffic log screen (`Logs` tab in Compose UI)
+- [x] Allow/block status
+- [x] Application name and package name
+- [x] Destination
+- [x] Protocol
+- [x] Port
 
 ## Phase 8 - Reliability
 
-- [ ] IPv6 support (packet parsing, CIDR/address rules, and verified IPv6 forwarding)
-- [ ] VPN restart handling
-- [ ] Network change handling
-- [ ] Always-on VPN testing (`SUPPORTS_ALWAYS_ON` currently `false`)
-- [ ] Battery usage testing
+- [x] IPv6 packet parsing, CIDR/address rules, and UI validation (`::/0` TUN capture route gated on upstream dual-stack UDP PCB support)
+- [x] VPN revocation and restart handling (`onRevoke()`, `FirewallVpnSessionOrchestrator`)
+- [x] Network change handling (`UnderlyingNetworkTracker` and `AndroidUnderlyingNetworkMonitor`)
+- [ ] Always-on VPN support (`SUPPORTS_ALWAYS_ON` and system `android.net.VpnService` start handling)
+- [ ] Physical-device battery and throughput profiling
 
 ## Phase 9 - Testing
 
-- [x] Unit tests for Phase 1–4 foundations (VPN lifecycle, packet parsers, UID resolver, and rule engine)
-- [ ] Unit tests for forwarding integration, app filtering, Room persistence, and UI ViewModels
-- [ ] Android instrumentation tests
-- [ ] Emulator tests
-- [ ] Physical device tests
+- [x] Unit tests for VPN session orchestration, packet parsers, UID resolver, rule engine, Room repository, and Compose state holder
+- [x] Go `-race` integration tests for `lwip2transport` TCP/UDP forwarding, socket protection order, and fail-closed admission
+- [x] Android instrumentation tests (Room database, Compose UI, and JNI `OutlineForwarderInstrumentedTest`)
+- [x] Automated GitHub Actions Android API 30 Emulator (`x86_64` KVM) JNI & Room test job
+- [ ] Physical device end-to-end validation

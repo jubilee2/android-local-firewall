@@ -12,30 +12,27 @@ Android network stack
         |
         v
 
-VpnService
+FirewallVpnService (TUN 10.0.0.2/32, route 0.0.0.0/0)
 
         |
         v
 
-TUN interface
+OutlinePacketForwarder (Go/JNI pre-stack IPv4/IPv6 + TCP/UDP/Fragment inspection)
+  + ConnectionOwnerResolver (Android ConnectivityManager UID lookup)
 
         |
         v
 
-Packet Processor
-
-        |
-        v
-
-Firewall Rule Engine
+PacketDecisionCoordinator -> FragmentDecisionEngine / RuleEngine (fail-closed on unknown UID)
 
       /     \
      /       \
- ALLOW       BLOCK
+ ALLOW       BLOCK (dropped before lwIP; zero sockets opened)
    |
    v
 
-Network forwarding
+Outline SDK network/lwip2transport (userspace lwIP)
+  -> Protected OS TCP/UDP socket (VpnService.protect before connect/send)
 
    |
    v
@@ -43,80 +40,65 @@ Network forwarding
 Internet
 
 
-## Android modules
+## Android & native modules
 
-Initial implementation may use a single Android app module.
+Single Android application module (`:app`) with reproducible Go/CGo JNI library (`native/outline-forwarder` -> `liboutline_forwarder.so` for `arm64-v8a` and `x86_64`).
 
-Package structure:
+Package structure (`com.localfirewall.app`):
 
-`com.localfirewall.app`
-
-- `ui/` (implemented Compose start/stop shell; app rules, network rules, and traffic log screens planned)
-- `vpn/` (implemented `FirewallVpnService`, permission flow, `/32` TUN lifecycle, and `PacketProcessor`)
-- `firewall/` (implemented IPv4/CIDR/protocol/port `RuleEngine`, `FragmentDecisionEngine`, and `ConnectionOwnerResolver`; per-app rule matching planned)
-- `network/` (implemented IPv4/TCP/UDP parsers, `PacketMetadata`, `FlowKey`, and `PacketForwarderLifecycle` scaffold; actual userspace packet forwarding not yet implemented)
-- `data/` (planned `FirewallRepository` and Room persistence)
+- `ui/` — Jetpack Compose `Status`, `Apps`, `Rules`, and `Logs` screens plus `FirewallStateHolder` / `FirewallViewModel` and `NetworkRuleInputParser`
+- `vpn/` — `FirewallVpnService`, `FirewallVpnSessionOrchestrator`, `PacketDecisionCoordinator`, `InstalledAppsProvider`, `AndroidUnderlyingNetworkMonitor`, VPN permission flow, and standalone `PacketProcessor`
+- `firewall/` — `RuleEngine` (UID + IPv4/IPv6 CIDR + TCP/UDP + destination port + `failClosedOnUnknownUid`), `FragmentDecisionEngine`, and `ConnectionOwnerResolver`
+- `network/` — `PacketForwarder`, `PacketForwarderLifecycle`, `network/outline/` (`OutlinePacketForwarder`, `OutlineNativeBridge`), IPv4/IPv6/TCP/UDP parsers, `PacketMetadata`, and `FlowKey`
+- `data/` — `FirewallRepository`, `FirewallLocalStore`, and Room persistence (`data/local/FirewallDatabase`, entities, DAOs)
 
 
 ## Components
 
-### FirewallVpnService
+### FirewallVpnService & FirewallVpnSessionOrchestrator
 
 Responsible for:
 
-- creating VPN
-- creating TUN interface (currently a minimal `/32` interface with no default capture routes until forwarding passes ADR-001 gates)
-- starting packet processing
-- stopping VPN
+- establishing the foreground `VpnService` TUN interface (`10.0.0.2/32`, MTU `1500`, IPv4 default route `0.0.0.0/0`, omitting `allowFamily(AF_INET6)` so uncaptured IPv6 cannot bypass policy)
+- tracking active underlying networks via `AndroidUnderlyingNetworkMonitor` (`setUnderlyingNetworks`)
+- starting `PacketDecisionCoordinator` (`failClosedOnUnknownUid = true`) and `OutlinePacketForwarder` through `PacketForwarderLifecycle`
+- tearing down the forwarder before closing the coordinator, network monitor, and TUN descriptor on `ACTION_STOP`, `onRevoke()`, `onDestroy()`, startup failure, or fatal forwarder error
 
-It should NOT contain firewall rule logic.
+Contains no firewall rule matching logic.
 
-### PacketProcessor
+### OutlinePacketForwarder & `native/outline-forwarder`
 
 Responsible for:
 
-- reading packets from TUN
-- parsing IP packets (currently IPv4 + TCP/UDP headers; IPv6 planned)
-- resolving owning Android UID via `ConnectionOwnerResolver`
-- sending packet metadata to `FragmentDecisionEngine` / `RuleEngine`
+- verifying compiled Go module metadata against `BuildConfig.OUTLINE_SDK_COMMIT` before starting
+- duplicating the TUN file descriptor and running non-blocking `unix.Poll` + wakeup-pipe I/O loops
+- extracting 5-tuple and fragment headers before `lwip2transport` (`IPDevice.Write`), resolving the owning Android UID via `ConnectionOwnerResolver`, and consulting `PacketDecisionCoordinator`
+- forwarding `ALLOW` flows directly to original destinations over `lwip2transport` using outbound OS TCP/UDP sockets protected synchronously via `VpnService.protect(fd)` inside `syscall.RawConn.Control` before `connect()`/`sendto()`
 
-Note: `PacketProcessor` currently evaluates metadata in-memory without forwarding allowed packets or enforcing blocked flows on device traffic.
+### RuleEngine & FragmentDecisionEngine
 
-### Network forwarding (`PacketForwarder`)
+Inputs:
 
-Planned userspace forwarding boundary (ADR-001 selects Outline SDK `network/lwip2transport` contingent on acceptance gates; PR #30 is recorded as a failed integration spike, so no native stack or default route is wired yet).
-
-### RuleEngine
-
-Target input:
-
-- application (planned; UID resolution exists in `PacketMetadata`, `FirewallRule` currently matches network fields only)
-- destination IP / CIDR (IPv4 implemented; IPv6 planned)
-- protocol (TCP/UDP implemented)
-- destination port (implemented)
+- Android application UID (`uid`, with `failClosedOnUnknownUid = true` in enforced VPN mode)
+- destination IP / CIDR (`IPv4Cidr` and `IPv6Cidr`)
+- transport protocol (`TCP` / `UDP`)
+- destination port
 
 Output:
 
-ALLOW or BLOCK
+- `ALLOW` or `BLOCK` (correlating initial-fragment decisions across subsequent fragments in `FragmentDecisionEngine`)
 
-RuleEngine must be independently unit testable.
+Independently unit-testable on the host JVM without Android UI.
 
-### FirewallRepository (planned)
+### FirewallRepository & Room database
 
-Responsible for loading and storing firewall rules.
+Persists locally on-device:
 
-### Room database (planned)
-
-Stores:
-
-- application rules
-- network rules
-- traffic log
+- per-application firewall rules (`app_rules`)
+- IPv4/IPv6 CIDR, protocol, and port rules (`network_rules`)
+- firewall settings (`firewall_settings`)
+- bounded metadata-only traffic logs (`traffic_logs`, zero packet payload storage)
 
 ### UI
 
-Jetpack Compose.
-
-UI communicates with repositories/view models.
-
-UI must not directly manipulate the VPN packet loop.
+Jetpack Compose screens communicating exclusively through `FirewallViewModel` / `FirewallStateHolder` and `FirewallRepository` without touching the VPN packet loop directly.

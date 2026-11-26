@@ -1,11 +1,10 @@
 package com.localfirewall.app.network
 
 /**
- * Owns the future Outline/lwIP bridge that forwards packets from the VPN TUN interface.
+ * Owns the Outline SDK `lwip2transport` bridge that forwards packets from the VPN TUN interface.
  *
  * Implementations must not return from [start] until their resources are ready, and [stop]
- * must be safe after a partially failed start. The VPN service must not install a default route
- * until a working implementation is wired to this boundary.
+ * must be safe after a partially failed start.
  */
 internal interface PacketForwarder {
     fun start()
