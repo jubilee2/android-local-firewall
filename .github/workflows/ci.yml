@@ -141,8 +141,6 @@ jobs:
             adb wait-for-device
             adb install -r artifacts/debug/*.apk
             adb install -r artifacts/androidTest/*.apk
-            adb shell am instrument -w \
-              -e class com.localfirewall.app.network.outline.OutlineForwarderInstrumentedTest,com.localfirewall.app.data.FirewallDatabaseInstrumentedTest \
-              com.localfirewall.app.test/androidx.test.runner.AndroidJUnitRunner | tee instrument.log
-            ! grep -q "FAILURES!!!" instrument.log
+            adb shell am instrument -w -e class com.localfirewall.app.network.outline.OutlineForwarderInstrumentedTest,com.localfirewall.app.data.FirewallDatabaseInstrumentedTest com.localfirewall.app.test/androidx.test.runner.AndroidJUnitRunner | tee instrument.log
+            if grep -q "FAILURES!!!" instrument.log; then exit 1; fi
             grep -q "OK (" instrument.log
